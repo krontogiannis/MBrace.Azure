@@ -4,6 +4,7 @@ open System
 open MBrace.Core
 open MBrace.Azure.Runtime.Primitives
 open MBrace.Runtime.Utils
+open MBrace.Azure
 
 [<Sealed>]
 type internal FaultHandler () =

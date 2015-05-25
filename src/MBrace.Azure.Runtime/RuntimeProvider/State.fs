@@ -95,10 +95,10 @@ with
                     Cloud.StartWithContinuations(wf, cont, ctx)
                 let jobType aff =
                     match distribType, aff with
-                    | Parallel, Some a -> ParallelAffined(a, i, wfs.Length-1)
-                    | Choice, Some a   -> ChoiceAffined(a, i, wfs.Length-1)
-                    | Parallel, None   -> JobType.Parallel(i,wfs.Length-1)
-                    | Choice, None     -> JobType.Choice(i,wfs.Length-1)
+                    | DistributionType.Parallel, Some a -> ParallelAffined(a, i, wfs.Length-1)
+                    | DistributionType.Choice, Some a   -> ChoiceAffined(a, i, wfs.Length-1)
+                    | DistributionType.Parallel, None   -> Parallel(i,wfs.Length-1)
+                    | DistributionType.Choice, None     -> Choice(i,wfs.Length-1)
 
                 let pickle value = VagabondRegistry.Instance.Pickler.PickleTyped(value)
 

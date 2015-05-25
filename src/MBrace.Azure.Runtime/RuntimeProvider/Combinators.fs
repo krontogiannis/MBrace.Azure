@@ -13,6 +13,8 @@ open MBrace.Azure.Runtime.Primitives
 
 #nowarn "444"
 
+open MBrace.Azure
+
 let inline private withCancellationToken (cts : ICloudCancellationToken) (ctx : ExecutionContext) =
     { ctx with Resources = ctx.Resources.Register(cts) ; CancellationToken = cts }
 
@@ -75,7 +77,7 @@ let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations
                 } |> JobExecutionMonitor.ProtectAsync ctx
 
             try
-                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, onSuccess, onException, onCancellation, computations, Parallel, parentJob.JobId, parentJob.ResultCell)
+                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, onSuccess, onException, onCancellation, computations, DistributionType.Parallel, parentJob.JobId, parentJob.ResultCell)
             with e ->
                 childCts.Cancel() ; return! Async.Raise e
                     
@@ -147,7 +149,7 @@ let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations :
                 } |> JobExecutionMonitor.ProtectAsync ctx
 
             try
-                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, (fun _ -> onSuccess), onException, onCancellation, computations, Choice, parentJob.JobId, parentJob.ResultCell)
+                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, (fun _ -> onSuccess), onException, onCancellation, computations, DistributionType.Choice, parentJob.JobId, parentJob.ResultCell)
             with e ->
                 childCts.Cancel() ; return! Async.Raise e
                     

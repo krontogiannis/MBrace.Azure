@@ -59,22 +59,6 @@ type ProcessInfo =
         DictionaryProvider : ICloudDictionaryProvider option
     }
 
-/// Job kind.
-type JobType =
-    /// Root job for process.
-    | Root
-    /// Job created by Cloud.StartChild.
-    | StartChild
-    /// Job created by Cloud.StartChild with affinity.
-    | Affined of affinity : string
-    /// Job created by Cloud.Parallel.
-    | Parallel of index : int * maxIndex : int
-    /// Job created by Cloud.Choice.
-    | Choice of index : int * maxIndex : int
-    /// Job created by Cloud.Parallel with affinity.
-    | ParallelAffined of affinity : string * index : int * maxIndex : int
-    /// Job created by Cloud.Choice with affinity.
-    | ChoiceAffined of affinity : string * index : int * maxIndex : int
 
 type internal DistributionType =
     | Choice
