@@ -157,6 +157,6 @@ let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations :
 
 
 let StartAsCloudTask (state : RuntimeState) psInfo (jobId : string) dependencies ct fp (computation : Cloud<'T>) (affinity : IWorkerRef option) = cloud {
-    let taskType = match affinity with None -> JobType.StartChild | Some wr -> JobType.Affined wr.Id
+    let taskType = match affinity with None -> JobType.Task | Some wr -> JobType.TaskAffined wr.Id
     return! Cloud.OfAsync <| state.StartAsTask(psInfo, dependencies, ct, fp, computation, taskType, jobId)
 }

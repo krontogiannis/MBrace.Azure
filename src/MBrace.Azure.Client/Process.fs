@@ -19,7 +19,7 @@ open MBrace.Azure.Runtime.Primitives
 
 [<AutoSerializable(false); AbstractClass>]
 /// Represents a cloud process.
-type Process internal (config, pid : string, ty : Type, pmon : ProcessManager) = 
+type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, jman : JobManager) = 
     
     let proc = 
         new Live<_>((fun () -> pmon.GetProcess(pid)), initial = Choice2Of2(exn ("Process not initialized")), 
@@ -108,10 +108,19 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager) =
     /// Prints a detailed report for this process.
     member this.ShowInfo () = printf "%s" <| ProcessReporter.Report([proc.Value], "Process", false)
 
+    member this.GetJobsAsync() = jman.List(pid)
+
+    member this.GetJobs() = Async.RunSync(this.GetJobsAsync())
+
+    member this.ShowJobs() = printfn "%s" <| JobReporter.Report(this.GetJobs(), sprintf "Jobs for process %s" pid, false)
+
+    member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
+        
+
 [<AutoSerializable(false)>]
 /// Represents a cloud process.
-type Process<'T> internal (config, pid : string, pmon : ProcessManager) = 
-    inherit Process(config, pid, typeof<'T>, pmon) 
+type Process<'T> internal (config, pid : string, pmon : ProcessManager, jman : JobManager) = 
+    inherit Process(config, pid, typeof<'T>, pmon, jman) 
 
     override this.AwaitResultBoxed () : obj = this.AwaitResultBoxedAsync() |> Async.RunSync 
     override this.AwaitResultBoxedAsync () : Async<obj> =

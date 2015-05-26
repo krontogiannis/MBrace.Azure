@@ -38,6 +38,8 @@ type RuntimeState =
         ProcessManager : ProcessManager
         /// Worker management.
         WorkerManager : WorkerManager
+        /// Job management.
+        JobManager : JobManager
         /// Runtime Logger.
         Logger : RuntimeLogger
         /// ConfigurationId.
@@ -61,6 +63,7 @@ with
         let resourceFactory = ResourceFactory.Create(configurationId) 
         let pman = ProcessManager.Create(configurationId)
         let wman = WorkerManager.Create(configurationId, logger)
+        let jman = JobManager.Create(configurationId, logger)
         return { 
             ConfigurationId = configurationId
             JobQueue = jobQueue
@@ -68,6 +71,7 @@ with
             ResourceFactory = resourceFactory 
             ProcessManager = pman
             WorkerManager = wman
+            JobManager = jman
             Logger = logger
         }
     }
@@ -118,6 +122,11 @@ with
                         ResultCell              = resultCell
                     }
                 jobs.[i] <- job, affinity
+
+            let returnType = PrettyPrinters.Type.prettyPrint typeof<'T>
+            let info = jobs |> Seq.map (fun (j, _) -> j.JobId, j.JobType, Configuration.Pickler.ComputeSize(j))
+            do! this.JobManager.CreateBatch(psInfo.Id, info, returnType, parentJobId)
+
             do! this.JobQueue.EnqueueBatch<PickledJob>(jobs, pid = psInfo.Id)
             do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id, jobs.Length)
         }
@@ -127,7 +136,7 @@ with
             let startJob ctx =
                 let cont = { Success = sc ; Exception = ec ; Cancellation = cc }
                 Cloud.StartWithContinuations(wf, cont, ctx)
-            let affinity = match jobType with Affined a -> Some a | _ -> None
+            let affinity = match jobType with TaskAffined a -> Some a | _ -> None
             let pickle value = VagabondRegistry.Instance.Pickler.PickleTyped(value)
 
             let job = 
@@ -146,6 +155,10 @@ with
                     ResultCell              = resultCell
                 }
 
+            this.Logger.Logf "Creating Job record."
+            let returnType = PrettyPrinters.Type.prettyPrint typeof<'T>
+            let size = Configuration.Pickler.ComputeSize(job)
+            do! this.JobManager.Create(psInfo.Id, jobId, jobType, returnType, parentJobId, size)
             this.Logger.Logf "Job Enqueue."
             do! this.JobQueue.Enqueue<PickledJob>(job, ?affinity = affinity, pid = psInfo.Id)
             this.Logger.Logf "Job Enqueue completed."

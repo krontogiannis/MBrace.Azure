@@ -264,7 +264,7 @@ type Runtime private (clientId, config : Configuration) =
             clientLogger.Logf "Submit process %s." info.Id
             let! _ = state.StartAsProcess(info, dependencies, faultPolicy, workflow, ?ct = cancellationToken)
             clientLogger.Logf "Created process %s." info.Id
-            let ps = Process<'T>(configuration.ConfigurationId, info.Id, pmon)
+            let ps = Process<'T>(configuration.ConfigurationId, info.Id, pmon, state.JobManager)
             ProcessCache.Add(ps)
             return ps
         }

@@ -8,6 +8,53 @@ open MBrace.Runtime.Utils.PrettyPrinters
 open System
 open Microsoft.FSharp.Linq.NullableOperators
 open MBrace.Azure
+open System.Text
+open MBrace.Azure.Runtime.Utilities
+
+type internal JobReporter() = 
+    static let onNull (value : Nullable<'T>) = 
+        if value.HasValue then value.Value.ToString() else "N/A" 
+
+    static let template : Field<JobInfo> list = 
+        [ Field.create "Id" Left (fun p -> p.Id)
+          Field.create "Type" Right (fun p -> p.JobType)
+          Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
+          Field.create "Return Type" Left (fun p -> p.ReturnType) 
+          Field.create "Timestamp" Left (fun p -> p.Timestamp)
+          Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
+          Field.create "Delivery Count" Left (fun p -> p.DeliveryCount)
+          Field.create "Initialization" Left (fun p -> onNull p.InitializationTime) 
+          Field.create "CompletionTime" Left (fun p -> onNull p.CompletionTime) 
+        ]
+    
+    static member Report(jobs : JobInfo seq, title, borders) = 
+        let ps = jobs 
+                 |> Seq.sortBy (fun p -> p.Timestamp, p.Status, p.JobType)
+                 |> Seq.toList
+        Record.PrettyPrint(template, ps, title, borders)
+
+    static member ReportTreeView(jobs : JobInfo seq, title) =
+        let sb = new StringBuilder()
+        let _ = sb.AppendLine(title)
+
+        let shorten (id : string) = sprintf "%s...%s" <| id.Substring(0, 7) <| id.Substring(id.Length - 3)
+
+        let root = jobs |> Seq.find (fun j -> j.JobType = Root)
+
+        let child (current : JobInfo) =
+            jobs |> Seq.filter (fun j -> j.ParentId = current.Id)
+
+        let rec treeview (current : JobInfo) depth : unit =
+            if depth > 0 then
+                for i = 0 to 4 * (depth-1) - 1 do 
+                    ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
+                let _ = sb.Append("├───") // fancy
+                ()
+            let _ = sb.AppendLine(sprintf "%s %O %+A" (shorten current.Id) current.JobType current.Status)
+            child current |> Seq.iter (fun j -> treeview j (depth + 1))
+        treeview root 0
+        sb.ToString()
+
 
 type internal ProcessReporter() = 
     static let template : Field<ProcessRecord> list = 
