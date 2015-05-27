@@ -210,6 +210,22 @@ type ResultAggregator<'T> internal (config : ConfigurationId, partitionKey : str
             return xs |> Seq.forall (fun e -> not <| String.IsNullOrEmpty(e.Uri))
         }
 
+    member __.PartitionKey = partitionKey
+    member __.RowKey = rowKey
+
+    member __.TryGetResult(index : int) : Async<'T option> =
+        async {
+            if index >= size then return raise <| ArgumentOutOfRangeException("index", sprintf "Requested index %d, but size is %d" index size)
+
+            let! entity = Table.read<BlobReferenceEntity> config config.RuntimeTable partitionKey (mkRowKey rowKey index)
+            if String.IsNullOrEmpty entity.Uri then
+                return None
+            else
+                let blob = Blob<'T>.FromPath(config, entity.Uri)
+                let! value = blob.GetValue()
+                return Some value
+        }
+
     member __.SetResult(index : int, value : 'T) : Async<bool> = 
         async { 
             let e = new BlobReferenceEntity(partitionKey, mkRowKey rowKey index, null, ETag = "*")
@@ -242,6 +258,8 @@ type ResultAggregator<'T> internal (config : ConfigurationId, partitionKey : str
                     incr i
                 return re
         }
+
+    static member Get<'T>(config, pid, row, size) = new ResultAggregator<'T>(config, pid, row, size)
 
     static member Create<'T>(config, size, pid) = 
         let name = guid()

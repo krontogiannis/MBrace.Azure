@@ -87,7 +87,7 @@ with
     /// <param name="cc">Cancellation continuation.</param>
     /// <param name="wfs">Workflows</param>
     /// <param name="affinity">Optional job affinity.</param>
-    member internal this.EnqueueJobBatch(psInfo : ProcessInfo, dependencies, cts, fp, scFactory, ec, cc, wfs : (#Cloud<'T> * IWorkerRef option) [], distribType : DistributionType, parentJobId, resultCell) : Async<unit> =
+    member internal this.EnqueueJobBatch(psInfo : ProcessInfo, dependencies, cts, fp, scFactory, ec, cc, wfs : (#Cloud<'T> * IWorkerRef option) [], distribType : DistributionType, parentJobId, resultCell, aggregatorPk, aggregatorRk) : Async<unit> =
         async {
             let jobs = Array.zeroCreate wfs.Length
             let pid = psInfo.Id
@@ -142,7 +142,7 @@ with
 
             let returnType = PrettyPrinters.Type.prettyPrint typeof<'T>
             let info = jobs |> Seq.map (fun (j, _) -> j.JobId, j.JobType, Configuration.Pickler.ComputeSize(j))
-            do! this.JobManager.CreateBatch(psInfo.Id, info, returnType, parentJobId)
+            do! this.JobManager.CreateBatch(psInfo.Id, info, returnType, parentJobId, aggregatorPk, aggregatorRk)
 
             do! this.JobQueue.EnqueueBatch<PickledJob>(jobs, pid = psInfo.Id)
             do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id, jobs.Length)
@@ -192,7 +192,7 @@ with
             this.Logger.Logf "Creating Job record."
             let returnType = PrettyPrinters.Type.prettyPrint typeof<'T>
             let size = Configuration.Pickler.ComputeSize(job)
-            do! this.JobManager.Create(psInfo.Id, jobId, jobType, returnType, parentJobId, size)
+            do! this.JobManager.Create(psInfo.Id, jobId, jobType, returnType, parentJobId, size, fst resultCell, snd resultCell)
             this.Logger.Logf "Job Enqueue."
             do! this.JobQueue.Enqueue<PickledJob>(job, ?affinity = affinity, pid = psInfo.Id)
             this.Logger.Logf "Job Enqueue completed."

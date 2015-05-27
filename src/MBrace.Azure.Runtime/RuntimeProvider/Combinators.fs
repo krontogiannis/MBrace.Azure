@@ -46,7 +46,7 @@ let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations
             let resultAggregator = requestBatch.RequestResultAggregator<'T>(computations.Length)
             let cancellationLatch = requestBatch.RequestCounter(0)
             do! requestBatch.CommitAsync()
-
+            
             let onSuccess i ctx (t : 'T) = 
                 async { 
                     let! isCompleted = resultAggregator.SetResult(i, t)
@@ -80,7 +80,7 @@ let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations
                 } |> JobExecutionMonitor.ProtectAsync ctx
 
             try
-                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, onSuccess, onException, onCancellation, computations, DistributionType.Parallel, parentJob.JobId, parentJob.ResultCell)
+                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, onSuccess, onException, onCancellation, computations, DistributionType.Parallel, parentJob.JobId, parentJob.ParentResultCell, resultAggregator.PartitionKey, resultAggregator.RowKey)
                 do! state.JobManager.Update(pid, parentId, JobStatus.Suspended, workerId)
             with e ->
                 childCts.Cancel() ; return! Async.Raise e
@@ -157,7 +157,7 @@ let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations :
                 } |> JobExecutionMonitor.ProtectAsync ctx
 
             try
-                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, (fun _ -> onSuccess), onException, onCancellation, computations, DistributionType.Choice, parentJob.JobId, parentJob.ResultCell)
+                do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, (fun _ -> onSuccess), onException, onCancellation, computations, DistributionType.Choice, parentJob.JobId, parentJob.ParentResultCell, null, null)
                 do! state.JobManager.Update(pid, parentId, JobStatus.Suspended, workerId)
             with e ->
                 childCts.Cancel() ; return! Async.Raise e

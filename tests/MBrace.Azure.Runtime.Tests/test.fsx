@@ -45,6 +45,11 @@ runtime.AttachLocalWorker(1, 16)
 
 let ps = runtime.CreateProcess <| cloud { return 42 }    
 
+let j = ps.GetJobs() |> Seq.toArray
+j.[0].TryGetResult<int>() |> Async.RunSynchronously
+
+ps.AwaitResult()
+
 
 let ps = 
     [1..5]
@@ -59,11 +64,10 @@ let ps =
 let ps = 
     cloud {
         printfn "1"
-        do! Cloud.Sleep 10000
-        do! [1..5] |> Seq.map (fun _ -> cloud { return 42 })
+        do! [1..2] |> Seq.map (fun _ -> cloud { return! Cloud.Sleep 10000 })
                    |> Cloud.Parallel
                    |> Cloud.Ignore
-        do! Cloud.Sleep 10000
+        do! Cloud.Sleep 20000
         printfn "2"
         return 42
     } |> runtime.CreateProcess

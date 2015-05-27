@@ -82,7 +82,7 @@ type Job =
         /// Distributed cancellation token source bound to job.
         CancellationTokenSource : DistributedCancellationTokenSource
         /// Parent task result cell path
-        ResultCell : string * string
+        ParentResultCell : string * string
         /// Type of job.
         JobType : JobType
         /// JobId of parent Job.
@@ -193,5 +193,5 @@ type PickledJob =
             CancellationTokenSource = this.CancellationTokenSource
             JobType = this.JobType
             ParentJobId = this.ParentJobId
-            ResultCell = this.ResultCell
+            ParentResultCell = this.ResultCell
         }
