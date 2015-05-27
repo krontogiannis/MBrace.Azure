@@ -1,21 +1,24 @@
 ﻿namespace MBrace.Azure.Runtime.Info
 
+open MBrace.Core.Internals
+
+open MBrace.Azure
+
 open System
 open Microsoft.WindowsAzure.Storage.Table
 open MBrace.Azure.Runtime.Utilities
 
 type JobRecord (processId, jobId) =
     inherit TableEntity(processId, jobId)
-    member val ProcessId : string = processId with get, set
     member val Id : string = jobId with get, set
     member val ParentId : string = null with get, set
-    member val JobType : string = null with get, set
     
+    member val Kind = Nullable<int>() with get, set
     member val Affinity : string = null with get, set
     member val Index = Nullable<int>() with get, set
     member val MaxIndex = Nullable<int>() with get, set
 
-    member val Status : string = null with get, set
+    member val Status = Nullable<int>() with get, set
     member val CancellationUri : string = null with get, set
     member val ResultPartition : string = null with get, set
     member val ResultRow : string = null with get, set
@@ -30,10 +33,9 @@ type JobRecord (processId, jobId) =
 
 namespace MBrace.Azure
 
-open MBrace.Azure.Runtime.Utilities
-open MBrace.Azure.Runtime.Info
 open MBrace.Core.Internals
 open MBrace.Runtime.Utils
+open MBrace.Azure.Runtime.Info
 open System
 
 /// Job kind.
@@ -55,39 +57,34 @@ type JobType =
 
     override this.ToString() =
         match this with
-        | Root -> "Root"
-        | Task -> "Task"
         | TaskAffined a -> sprintf "Task(%s)" a
-        | Parallel(i,m) -> sprintf "Parallel(%d,%d)" i m 
-        | Choice(i,m) -> sprintf "Choice(%d,%d)" i m 
         | ParallelAffined(a,i,m) -> sprintf "Parallel(%s,%d,%d)" a i m 
         | ChoiceAffined(a,i,m) -> sprintf "Choice(%s,%d,%d)" a i m 
+        | _ -> sprintf "%A" this
 
 /// Job status
 type JobStatus =
-    | Posted
-    | Active
-    | Inactive
-    | Completed
+    | Posted    = 0
+    | Active    = 1
+    | Inactive  = 2
+    | Completed = 3
+    | Cancelled = 4
+    | Suspended = 5
+
+// Stored in table.
+type private JobKind =
+    | Root            = 0
+    | Task            = 1
+    | TaskAffined     = 2
+    | Parallel        = 3
+    | Choice          = 4
+    | ParallelAffined = 5
+    | ChoiceAffined   = 6
 
 [<AutoOpen>]
 module private Helpers =
     open MBrace.Azure.Runtime.Utilities
-
-    [<Literal>]
-    let RootL            = "Root"
-    [<Literal>]
-    let TaskL            = "Task"
-    [<Literal>]
-    let AffinedL         = "TaskAffined"
-    [<Literal>] 
-    let ParallelL        = "Parallel"
-    [<Literal>] 
-    let ChoiceL          = "Choice"
-    [<Literal>] 
-    let ParallelAffinedL = "ParallelAffined"
-    [<Literal>] 
-    let ChoiceAffinedL   = "ChoiceAffined"
+    open MBrace.Azure.Runtime.Info
 
     let parseJobType (jobRecord : JobRecord) =
         let invalid () =
@@ -96,62 +93,60 @@ module private Helpers =
             match jobRecord.Index.HasValue, jobRecord.MaxIndex.HasValue with
             | true, true -> jobRecord.Index.Value, jobRecord.MaxIndex.Value
             | _ -> invalid()
-        match jobRecord.JobType with
-        | RootL -> Root
-        | TaskL -> Task
-        | AffinedL when jobRecord.Affinity <> null -> TaskAffined(jobRecord.Affinity)
-        | ParallelL -> let idx, maxIdx = getIdx() in Parallel(idx, maxIdx)
-        | ChoiceL -> let idx, maxIdx = getIdx() in Choice(idx, maxIdx)
-        | ParallelAffinedL when jobRecord.Affinity <> null ->
-            let idx, maxIdx = getIdx()
-            ParallelAffined(jobRecord.Affinity, idx, maxIdx)
-        | ChoiceAffinedL when jobRecord.Affinity <> null ->
-            let idx, maxIdx = getIdx()
-            ChoiceAffined(jobRecord.Affinity, idx, maxIdx)
-        | _ -> invalid ()
+        if not jobRecord.Kind.HasValue then
+            invalid ()
+        else
+            let kind = enum<JobKind>(jobRecord.Kind.Value)
+            match kind with
+            | JobKind.Root -> Root
+            | JobKind.Task -> Task
+            | JobKind.TaskAffined when jobRecord.Affinity <> null -> TaskAffined(jobRecord.Affinity)
+            | JobKind.Parallel -> let idx, maxIdx = getIdx() in Parallel(idx, maxIdx)
+            | JobKind.Choice -> let idx, maxIdx = getIdx() in Choice(idx, maxIdx)
+            | JobKind.ParallelAffined when jobRecord.Affinity <> null ->
+                let idx, maxIdx = getIdx()
+                ParallelAffined(jobRecord.Affinity, idx, maxIdx)
+            | JobKind.ChoiceAffined when jobRecord.Affinity <> null ->
+                let idx, maxIdx = getIdx()
+                ChoiceAffined(jobRecord.Affinity, idx, maxIdx)
+            | _ -> invalid ()
 
     let assignJobType (jobRecord : JobRecord) (jobType : JobType) =
         match jobType with
         | Root -> 
-            jobRecord.JobType <- RootL
+            jobRecord.Kind <- nullable(int JobKind.Root)
         | Task -> 
-            jobRecord.JobType <- TaskL
+            jobRecord.Kind <- nullable(int JobKind.Task)
         | TaskAffined a -> 
-            jobRecord.JobType <- AffinedL
+            jobRecord.Kind <- nullable(int JobKind.TaskAffined)
             jobRecord.Affinity <- a
         | Parallel(i,m) ->
-            jobRecord.JobType <- ParallelL
+            jobRecord.Kind <- nullable(int JobKind.Parallel)
             jobRecord.Index <- nullable i
             jobRecord.MaxIndex <- nullable m
         | Choice(i,m) ->
-            jobRecord.JobType <- ChoiceL
+            jobRecord.Kind <- nullable(int JobKind.Choice)
             jobRecord.Index <- nullable i
             jobRecord.MaxIndex <- nullable m
         | ParallelAffined(a,i,m) ->
-            jobRecord.JobType <- ParallelAffinedL
+            jobRecord.Kind <- nullable(int JobKind.ParallelAffined)
             jobRecord.Affinity <- a
             jobRecord.Index <- nullable i
             jobRecord.MaxIndex <- nullable m
         | ChoiceAffined(a,i,m) ->
-            jobRecord.JobType <- ChoiceAffinedL
+            jobRecord.Kind <-nullable(int JobKind.ChoiceAffined)
             jobRecord.Affinity <- a
             jobRecord.Index <- nullable i
             jobRecord.MaxIndex <- nullable m
 
     let parseJobStatus (jobRecord : JobRecord) =
-        match jobRecord.Status with
-        | "Posted" -> Posted
-        | "Active" -> Active
-        | "Inactive" -> Inactive
-        | "Completed" -> Completed
-        | _ -> failwith "Invalid Job Status %+A" jobRecord
+        if jobRecord.Status.HasValue then
+            enum<JobStatus>(jobRecord.Status.Value)
+        else
+            failwith "Invalid Job Status %+A" jobRecord
 
     let assignJobStatus (jobRecord : JobRecord) (status : JobStatus) =
-        match status with
-        | Posted -> jobRecord.Status <- "Posted"
-        | Active -> jobRecord.Status <- "Active"
-        | Inactive -> jobRecord.Status <- "Inactive"
-        | Completed -> jobRecord.Status <- "Completed"
+        jobRecord.Status <- nullable(int status)
         
 type JobInfo internal (job : JobRecord) =
     let jobType = parseJobType job
@@ -173,6 +168,15 @@ type JobInfo internal (job : JobRecord) =
     member this.CancellationToken = job.CancellationUri
     member this.Result = sprintf "%s/%s" job.ResultPartition job.ResultRow
 
+namespace MBrace.Azure.Runtime.Info
+
+open System
+open MBrace.Azure
+open MBrace.Runtime.Utils
+open MBrace.Core.Internals
+open MBrace.Azure.Runtime.Utilities
+
+
 [<AutoSerializableAttribute(false)>]
 type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
     let mkPartitionKey pid = sprintf "jobInfo:%s" pid
@@ -181,7 +185,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
 
     let mkRecord pid jobId jobType returnType parentId size =
         let job = new JobRecord(mkPartitionKey pid, jobId)
-        assignJobStatus job Posted
+        assignJobStatus job JobStatus.Posted
         assignJobType job jobType
         job.ReturnType <- returnType
         job.ParentId <- parentId
@@ -203,21 +207,23 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             do! Table.insertBatch config config.RuntimeTable jobs
         }
 
-    member this.Update(pid, jobId, status, workerId, ?deliveryCount) =
+    member this.Update(pid, jobId, status, ?workerId, ?deliveryCount) =
         async {
             let job = new JobRecord(mkPartitionKey pid, jobId)
             
             assignJobStatus job status
             
             match status with
-            | Posted | Active -> job.InitializationTime <- nullable DateTimeOffset.UtcNow
-            | Completed       -> job.CompletionTime <- nullable DateTimeOffset.UtcNow
-            | Inactive        -> ()
+            | JobStatus.Posted | JobStatus.Active -> 
+                job.InitializationTime <- nullable DateTimeOffset.UtcNow
+            | JobStatus.Completed | JobStatus.Cancelled -> 
+                job.CompletionTime <- nullable DateTimeOffset.UtcNow
+            | _ -> ()
 
             deliveryCount 
             |> Option.iter (fun dc -> job.DeliveryCount <- nullable dc)
-
-            job.WorkerId <- workerId
+            workerId
+            |> Option.iter (fun wid -> job.WorkerId <- wid)
             job.ETag <- "*"
             let! _job = Table.merge config config.RuntimeTable job
             return ()
@@ -234,7 +240,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             let job = new JobRecord(mkPartitionKey pid, jobId, ETag = "*")
             let! j = Table.merge config config.RuntimeTable job
             let job' = ref j
-            while job'.Value.Status = "Active" do
+            while job'.Value.Status.Value = int JobStatus.Active do
                 do! Async.Sleep heartBeatInterval
                 let! j = Async.Catch <| Table.merge config config.RuntimeTable job
                 match j with

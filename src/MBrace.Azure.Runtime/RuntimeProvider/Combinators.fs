@@ -10,10 +10,10 @@ open MBrace.Runtime
 open MBrace.Runtime.Utils
 open MBrace.Azure.Runtime
 open MBrace.Azure.Runtime.Primitives
+open MBrace.Azure
+open MBrace.Azure.Runtime.Info
 
 #nowarn "444"
-
-open MBrace.Azure
 
 let inline private withCancellationToken (cts : ICloudCancellationToken) (ctx : ExecutionContext) =
     { ctx with Resources = ctx.Resources.Register(cts) ; CancellationToken = cts }
@@ -37,15 +37,18 @@ let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations
             // request runtime resources required for distribution coordination
             let currentCts = ctx.CancellationToken :?> DistributedCancellationTokenSource
             
-            let! childCts = state.ResourceFactory.RequestCancellationTokenSource(parentJob.ProcessInfo.Id, parent = currentCts, metadata = parentJob.JobId, elevate = true)
+            let pid = parentJob.ProcessInfo.Id
+            let parentId = parentJob.JobId
+            let workerId = state.WorkerManager.Current.Id
+            let! childCts = state.ResourceFactory.RequestCancellationTokenSource(pid, parent = currentCts, metadata = parentId, elevate = true)
             
-            let requestBatch = state.ResourceFactory.GetResourceBatchForProcess(parentJob.ProcessInfo.Id)
+            let requestBatch = state.ResourceFactory.GetResourceBatchForProcess(pid)
             let resultAggregator = requestBatch.RequestResultAggregator<'T>(computations.Length)
             let cancellationLatch = requestBatch.RequestCounter(0)
             do! requestBatch.CommitAsync()
 
             let onSuccess i ctx (t : 'T) = 
-                async {
+                async { 
                     let! isCompleted = resultAggregator.SetResult(i, t)
                     if isCompleted then 
                         // this is the last child callback, aggregate result and call parent continuation
@@ -78,9 +81,10 @@ let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations
 
             try
                 do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, onSuccess, onException, onCancellation, computations, DistributionType.Parallel, parentJob.JobId, parentJob.ResultCell)
+                do! state.JobManager.Update(pid, parentId, JobStatus.Suspended, workerId)
             with e ->
                 childCts.Cancel() ; return! Async.Raise e
-                    
+             
             JobExecutionMonitor.TriggerCompletion ctx })
 
 let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations : seq<#Cloud<'T option> * IWorkerRef option>)  =
@@ -96,6 +100,10 @@ let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations :
 
         | Choice1Of2 computations ->
             // request runtime resources required for distribution coordination
+            let pid = parentJob.ProcessInfo.Id
+            let parentId = parentJob.JobId
+            let workerId = state.WorkerManager.Current.Id
+            
             let n = computations.Length // avoid capturing computation array in cont closures
             let currentCts = ctx.CancellationToken :?> DistributedCancellationTokenSource
             let! childCts = state.ResourceFactory.RequestCancellationTokenSource(parentJob.JobId, parent = currentCts, metadata = parentJob.JobId, elevate = true)
@@ -150,6 +158,7 @@ let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations :
 
             try
                 do! state.EnqueueJobBatch(parentJob.ProcessInfo, dependencies, childCts, parentJob.FaultPolicy, (fun _ -> onSuccess), onException, onCancellation, computations, DistributionType.Choice, parentJob.JobId, parentJob.ResultCell)
+                do! state.JobManager.Update(pid, parentId, JobStatus.Suspended, workerId)
             with e ->
                 childCts.Cancel() ; return! Async.Raise e
                     

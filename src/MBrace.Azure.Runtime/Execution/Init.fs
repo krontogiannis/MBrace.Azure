@@ -65,6 +65,7 @@ type Init =
                 yield Configuration.Serializer
                 yield state.WorkerManager
                 yield state.ProcessManager 
+                yield state.JobManager
             }
 
             return state, resources

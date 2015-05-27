@@ -56,8 +56,22 @@ let ps =
     |> runtime.CreateProcess 
 
 
+let ps = 
+    cloud {
+        printfn "1"
+        do! Cloud.Sleep 10000
+        do! [1..5] |> Seq.map (fun _ -> cloud { return 42 })
+                   |> Cloud.Parallel
+                   |> Cloud.Ignore
+        do! Cloud.Sleep 10000
+        printfn "2"
+        return 42
+    } |> runtime.CreateProcess
+
 ps.ShowJobs()
 ps.ShowJobsTree()
+
+
 
 
 

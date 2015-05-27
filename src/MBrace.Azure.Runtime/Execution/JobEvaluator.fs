@@ -106,8 +106,7 @@ and [<AutoSerializable(false)>]
 
                 logf "Starting job\n%s" (string job) 
                 logf "Delivery count : %d" msg.DeliveryCount
-                do! staticConfiguration.State.JobManager.Update
-                        (job.ProcessInfo.Id, job.JobId, Active, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount) // TODO : handle error
+                do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Active, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount) // TODO : handle error
                 
                 logf "Starting heartbeat loop for Job %s" job.JobId
                 let! _ = staticConfiguration.State.JobManager.Heartbeat(job.ProcessInfo.Id, job.JobId)
@@ -119,13 +118,12 @@ and [<AutoSerializable(false)>]
                 match result with
                 | Choice1Of2 true -> 
                     do! staticConfiguration.State.JobQueue.CompleteAsync(msg)
-                    do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Completed, staticConfiguration.State.WorkerManager.Current.Id)
                     do! staticConfiguration.State.ProcessManager.AddCompletedJob(job.ProcessInfo.Id)
                     logf "Completed job\n%s\nTime : %O" (string job) sw.Elapsed
                 | Choice1Of2 false -> 
                     do! staticConfiguration.State.JobQueue.CompleteAsync(msg)
-                    do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Completed, staticConfiguration.State.WorkerManager.Current.Id)
                     do! staticConfiguration.State.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
+                    //do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Suspended, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount)
                     logf "Faulted job\n%s\nTime : %O" (string job) sw.Elapsed
                 | Choice2Of2 e -> 
                     do! FaultHandler.FaultJobAsync(job, msg, staticConfiguration.State, e)

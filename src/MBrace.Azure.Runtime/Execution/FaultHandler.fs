@@ -15,6 +15,7 @@ type internal FaultHandler () =
             state.Logger.Logf "Failed to execute Job '%s'\n%A" job.JobId fault
             state.Logger.Logf "Faulted message : Abandon."
             do! state.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
+            do! state.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Inactive, state.WorkerManager.Current.Id)
             do! state.JobQueue.AbandonAsync(message)
         }
 
