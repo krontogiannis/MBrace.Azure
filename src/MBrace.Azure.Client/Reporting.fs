@@ -20,11 +20,12 @@ type internal JobReporter() =
           Field.create "Type" Right (fun p -> p.JobType)
           Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
           Field.create "Return Type" Left (fun p -> p.ReturnType) 
-          Field.create "Timestamp" Left (fun p -> p.Timestamp)
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
-          Field.create "# Deliveries" Left (fun p -> p.DeliveryCount)
-          Field.create "Created" Left (fun p -> onNull p.CreationTime) 
+          Field.create "# retries" Left (fun p -> p.DeliveryCount - 1)
+          Field.create "Posted" Left (fun p -> p.CreationTime) 
+          Field.create "Started" Left (fun p -> onNull p.StartTime) 
           Field.create "Completed" Left (fun p -> onNull p.CompletionTime) 
+          Field.create "Timestamp" Left (fun p -> p.Timestamp)
         ]
     
     static member Report(jobs : Job seq, title, borders) = 
@@ -37,7 +38,13 @@ type internal JobReporter() =
         let sb = new StringBuilder()
         let _ = sb.AppendLine(title)
 
-        let shorten (id : string) = sprintf "%s...%s" <| id.Substring(0, 7) <| id.Substring(id.Length - 3)
+        let append (job : Job) =
+            let sb = sb.AppendFormat("{0}...{1} ",job.Id.Substring(0,7), job.Id.Substring(job.Id.Length - 3))
+                       .AppendFormat("{0} {1} {2} ", job.JobType, getHumanReadableByteSize job.JobSize, job.Status)
+            let sb = if job.CompletionTime.HasValue then
+                        sb.Append(job.CompletionTime.Value - job.StartTime.Value)
+                     else sb
+            sb.AppendLine()
 
         let root = jobs |> Seq.find (fun j -> j.JobType = Root)
 
@@ -50,7 +57,7 @@ type internal JobReporter() =
                     ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
                 let _ = sb.Append("├───") // fancy
                 ()
-            let _ = sb.AppendLine(sprintf "%s %O %+A" (shorten current.Id) current.JobType current.Status)
+            let _ = append current
             child current |> Seq.iter (fun j -> treeview j (depth + 1))
         treeview root 0
         sb.ToString()

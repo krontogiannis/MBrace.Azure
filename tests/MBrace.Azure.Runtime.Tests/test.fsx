@@ -38,15 +38,12 @@ runtime.AttachClientLogger(new ConsoleLogger())
 //runtime.Reset()
 //Runtime.Reset(config, reactivate = false)
 // local only---
-runtime.AttachLocalWorker(1, 16)
+runtime.AttachLocalWorker(4, 16)
 //---
 
 
 
 let ps = runtime.CreateProcess <| cloud { return 42 }    
-
-let j = ps.GetJobs() |> Seq.toArray
-j.[0].TryGetResult<int>() |> Async.RunSynchronously
 
 ps.AwaitResult()
 
@@ -55,10 +52,27 @@ let ps =
     [1..5]
     |> Seq.map (fun i -> 
         [1..i] 
-        |> Seq.map (fun _ -> cloud { return i })
-        |> Cloud.Parallel)
+        |> Seq.map (fun j -> cloud { return i ,j })
+        |> Cloud.Parallel
+        |> Cloud.Ignore)
     |> Cloud.Parallel
+    |> Cloud.Ignore
     |> runtime.CreateProcess 
+
+ps.AwaitResult()
+ps.ShowJobsTree()
+ps.ShowJobs()
+
+ps.GetJobs()
+|> Seq.map (fun j -> 
+    try
+        Some(box <| j.TryGetResult<int * int>())
+    with _ ->
+        try
+            Some(box <| j.TryGetResult<unit>())
+        with _ ->
+            None)
+|> Seq.toArray
 
 
 let ps = 

@@ -90,7 +90,7 @@ module private Helpers =
 
     let parseJobType (jobRecord : JobRecord) =
         let invalid () =
-            failwithf "Invalid JobRecord %+A" jobRecord
+            failwithf "Invalid JobRecord %s" jobRecord.Id
         let getIdx () =
             match jobRecord.Index.HasValue, jobRecord.MaxIndex.HasValue with
             | true, true -> jobRecord.Index.Value, jobRecord.MaxIndex.Value
@@ -172,7 +172,7 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     /// The number of times this job has been dequeued for execution.
     member this.DeliveryCount = job.DeliveryCount.GetValueOrDefault(-1)
     /// The point in time this job was posted.
-    member this.CreationTime = job.CreationTime
+    member this.CreationTime = job.CreationTime.GetValueOrDefault()
     /// The point in time this job was marked as Active.
     member this.StartTime = job.StartTime
     /// The point in time this job completed.
@@ -194,7 +194,9 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
                     ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
                 | Choice _ | ChoiceAffined _ ->
                     raise(NotSupportedException("Partial result not supported for Choice."))
-            return result.Value
+            match result with
+            | Some r -> return Some r.Value
+            | None -> return None
         }
 
 namespace MBrace.Azure.Runtime.Info
@@ -240,13 +242,11 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             do! Table.insertBatch config config.RuntimeTable jobs 
         }
 
-    member this.UpdateBatch(pid, jobIds : string [], status) =
+    member this.UpdateBatch(pid, jobIds : string seq, status : JobStatus) =
         async {
-            let batch = new TableBatchOperation()
-            jobIds 
-            |> Seq.map (fun jobId -> new JobRecord(mkPartitionKey pid, jobId, ETag = "*", Status = status))
-            |> Seq.iter (fun j -> batch.Add(TableOperation.InsertOrReplace(j)))
-            do! Table.batch config config.RuntimeTable batch
+            let jobs = jobIds 
+                        |> Seq.map (fun jobId -> new JobRecord(mkPartitionKey pid, jobId, ETag = "*", Status = nullable(int status)))
+            do! Table.mergeBatch config config.RuntimeTable jobs
         }
 
     member this.Update(pid, jobId, status, ?workerId, ?deliveryCount) =
@@ -260,7 +260,9 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
                 job.CreationTime <- nullable DateTimeOffset.UtcNow
             | JobStatus.Active -> 
                 job.StartTime <- nullable DateTimeOffset.UtcNow
-            | JobStatus.Completed | JobStatus.Cancelled -> 
+            | JobStatus.Completed 
+            | JobStatus.Cancelled 
+            | JobStatus.Suspended ->
                 job.CompletionTime <- nullable DateTimeOffset.UtcNow
             | _ -> ()
 

@@ -143,8 +143,9 @@ with
             let returnType = PrettyPrinters.Type.prettyPrint typeof<'T>
             let info = jobs |> Seq.map (fun (j, _) -> j.JobId, j.JobType, Configuration.Pickler.ComputeSize(j))
             do! this.JobManager.CreateBatch(psInfo.Id, info, returnType, parentJobId, aggregatorPk, aggregatorRk)
-
             do! this.JobQueue.EnqueueBatch<PickledJob>(jobs, pid = psInfo.Id)
+            let ids = jobs |> Seq.map (fun (j,_) -> j.JobId)
+            do! this.JobManager.UpdateBatch(psInfo.Id, ids, JobStatus.Posted)
             do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id, jobs.Length)
         }
 
@@ -195,7 +196,9 @@ with
             do! this.JobManager.Create(psInfo.Id, jobId, jobType, returnType, parentJobId, size, fst resultCell, snd resultCell)
             this.Logger.Logf "Job Enqueue."
             do! this.JobQueue.Enqueue<PickledJob>(job, ?affinity = affinity, pid = psInfo.Id)
-            this.Logger.Logf "Job Enqueue completed."
+            this.Logger.Logf "Job Enqueue completed. Setting Job as posted."
+            do! this.JobManager.Update(psInfo.Id, jobId, JobStatus.Posted)
+            this.Logger.Logf "Job %s posted." jobId
             do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id)
         }
 
