@@ -12,7 +12,7 @@ open MBrace.Azure.Runtime.Info
 open MBrace.Azure.Runtime.Primitives
         
 /// Scheduling implementation provider
-type RuntimeProvider private (state : RuntimeState, job : Job, dependencies, isForcedLocalParallelism : bool) =
+type RuntimeProvider private (state : RuntimeState, job : JobItem, dependencies, isForcedLocalParallelism : bool) =
 
     let mkNestedCts (ct : ICloudCancellationToken) =
         let parentCts = ct :?> DistributedCancellationTokenSource
@@ -21,7 +21,7 @@ type RuntimeProvider private (state : RuntimeState, job : Job, dependencies, isF
         dcts :> ICloudCancellationTokenSource
 
     /// Creates a runtime provider instance for a provided job
-    static member FromJob state dependencies (job : Job) =
+    static member FromJob state dependencies (job : JobItem) =
         new RuntimeProvider(state, job, dependencies, false)
 
     interface IDistributionProvider with

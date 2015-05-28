@@ -56,7 +56,7 @@ and [<AutoSerializable(false)>]
             |> Async.RunSync
 
 
-    static let runJob (config : JobEvaluatorConfiguration) (job : Job) (deps : AssemblyId list) (faultCount : int)  =
+    static let runJob (config : JobEvaluatorConfiguration) (job : JobItem) (deps : AssemblyId list) (faultCount : int)  =
         let provider = RuntimeProvider.FromJob staticConfiguration.State deps job
         let info = job.ProcessInfo
         let serializer = staticConfiguration.Resources.Resolve<ISerializer>()
@@ -79,7 +79,7 @@ and [<AutoSerializable(false)>]
                     DefaultContainer = getDirectory info.DefaultChannelContainer config.ChannelDirectory staticConfiguration.State.ConfigurationId.UserDataTable }
             yield defaultArg info.DictionaryProvider config.Dictionary
         }
-        Job.RunAsync provider resources faultCount job
+        JobItem.RunAsync provider resources faultCount job
 
     static let run (config : JobEvaluatorConfiguration) (msg : QueueMessage) (dependencies : VagabondAssembly list) (jobItem : PickledJob) = 
         async {

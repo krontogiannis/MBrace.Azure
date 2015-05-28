@@ -65,7 +65,7 @@ type internal DistributionType =
     | Parallel
 
 /// Defines a job to be executed in a worker node
-type Job = 
+type JobItem = 
     {
         /// Return type of the defining cloud workflow.
         Type : Type
@@ -107,8 +107,8 @@ with
     static member RunAsync (runtimeProvider : IDistributionProvider) 
                            (resources : ResourceRegistry)
                            (faultCount : int)
-                           (job : Job) = async {
-        let ctx, jem = Job.CreateExecutionContext runtimeProvider resources job
+                           (job : JobItem) = async {
+        let ctx, jem = JobItem.CreateExecutionContext runtimeProvider resources job
         if faultCount > 0 then
             let faultException = new FaultException(sprintf "Fault exception when running job '%s', faultCount '%d'" job.JobId faultCount)
             match job.FaultPolicy.Policy faultCount (faultException :> exn) with
@@ -134,7 +134,7 @@ with
                 return! Async.Raise ex
     }
 
-    static member CreateExecutionContext (runtimeProvider : IDistributionProvider) (resources : ResourceRegistry) (job : Job) =
+    static member CreateExecutionContext (runtimeProvider : IDistributionProvider) (resources : ResourceRegistry) (job : JobItem) =
         let jem = new JobExecutionMonitor()
         let ctx =
             {
@@ -181,7 +181,7 @@ type PickledJob =
         PickledEcont : Pickle<ExecutionContext -> ExceptionDispatchInfo -> unit>
     }
     
-    member this.ToJob() : Job =
+    member this.ToJob() : JobItem =
         let unpickle pickle = VagabondRegistry.Instance.Pickler.UnPickleTyped(pickle)
         {
             ProcessInfo = this.ProcessInfo

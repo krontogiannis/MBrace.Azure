@@ -25,7 +25,8 @@ type JobRecord (processId, jobId) =
     member val WorkerId : string = null with get, set
     member val Size = Nullable<int64>() with get, set
     member val DeliveryCount = Nullable<int>() with get, set
-    member val InitializationTime = Nullable<DateTimeOffset>() with get, set
+    member val CreationTime = Nullable<DateTimeOffset>() with get, set
+    member val StartTime = Nullable<DateTimeOffset>() with get, set
     member val CompletionTime = Nullable<DateTimeOffset>() with get, set
 
     new () = JobRecord(null, null)
@@ -64,12 +65,13 @@ type JobType =
 
 /// Job status
 type JobStatus =
-    | Posted    = 0
-    | Active    = 1
-    | Inactive  = 2
-    | Completed = 3
-    | Cancelled = 4
-    | Suspended = 5
+    | Posting   = 0
+    | Posted    = 1
+    | Active    = 2
+    | Inactive  = 3
+    | Completed = 4
+    | Cancelled = 5
+    | Suspended = 6
 
 // Stored in table.
 type private JobKind =
@@ -148,32 +150,52 @@ module private Helpers =
     let assignJobStatus (jobRecord : JobRecord) (status : JobStatus) =
         jobRecord.Status <- nullable(int status)
         
-type JobInfo internal (config : ConfigurationId, job : JobRecord) =
+/// Represents a unit of work that can be executed by the distributed runtime.
+type Job internal (config : ConfigurationId, job : JobRecord) =
     let jobType = parseJobType job
     let status = parseJobStatus job
 
+    /// Job unique identifier.
     member this.Id = job.Id
+    /// Parent job identifier.
     member this.ParentId = job.ParentId
+    /// Type of this job.
     member this.JobType = jobType
+    /// Job status.
     member this.Status = status
+    /// Worker executing this job.
     member this.WorkerId = job.WorkerId
+    /// Job return type.
     member this.ReturnType = job.ReturnType
+    /// Job timestamp, used for active jobs.
     member this.Timestamp = job.Timestamp
+    /// The number of times this job has been dequeued for execution.
     member this.DeliveryCount = job.DeliveryCount.GetValueOrDefault(-1)
-    member this.InitializationTime = job.InitializationTime
+    /// The point in time this job was posted.
+    member this.CreationTime = job.CreationTime
+    /// The point in time this job was marked as Active.
+    member this.StartTime = job.StartTime
+    /// The point in time this job completed.
     member this.CompletionTime = job.CompletionTime
+    /// Approximation of the job's serialized size in bytes.
     member this.JobSize = job.Size.GetValueOrDefault()
 
+    /// Try get job's partial result.
     member this.TryGetResult<'T>() = Async.RunSync(this.TryGetResultAsync<'T>())
 
+    /// Try get job's partial result.
     member this.TryGetResultAsync<'T>() = 
-        match this.JobType with
-        | Root | Task | TaskAffined _ -> 
-            ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
-        | Parallel(i,m) | ParallelAffined(_,i,m) ->
-            ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
-        | Choice _ | ChoiceAffined _ ->
-            raise(NotSupportedException("Partial result not supported for Choice."))
+        async {
+            let! result = 
+                match this.JobType with
+                | Root | Task | TaskAffined _ -> 
+                    ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
+                | Parallel(i,m) | ParallelAffined(_,i,m) ->
+                    ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
+                | Choice _ | ChoiceAffined _ ->
+                    raise(NotSupportedException("Partial result not supported for Choice."))
+            return result.Value
+        }
 
 namespace MBrace.Azure.Runtime.Info
 
@@ -182,6 +204,7 @@ open MBrace.Azure
 open MBrace.Runtime.Utils
 open MBrace.Core.Internals
 open MBrace.Azure.Runtime.Utilities
+open Microsoft.WindowsAzure.Storage.Table
 
 
 [<AutoSerializableAttribute(false)>]
@@ -192,8 +215,9 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
 
     static let mkRecord pid jobId jobType returnType parentId size resPk resRk =
         let job = new JobRecord(mkPartitionKey pid, jobId)
-        assignJobStatus job JobStatus.Posted
+        assignJobStatus job JobStatus.Posting
         assignJobType job jobType
+        job.CreationTime <- nullable DateTimeOffset.UtcNow
         job.ReturnType <- returnType
         job.ParentId <- parentId
         job.Size <- nullable size
@@ -216,6 +240,15 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             do! Table.insertBatch config config.RuntimeTable jobs 
         }
 
+    member this.UpdateBatch(pid, jobIds : string [], status) =
+        async {
+            let batch = new TableBatchOperation()
+            jobIds 
+            |> Seq.map (fun jobId -> new JobRecord(mkPartitionKey pid, jobId, ETag = "*", Status = status))
+            |> Seq.iter (fun j -> batch.Add(TableOperation.InsertOrReplace(j)))
+            do! Table.batch config config.RuntimeTable batch
+        }
+
     member this.Update(pid, jobId, status, ?workerId, ?deliveryCount) =
         async {
             let job = new JobRecord(mkPartitionKey pid, jobId)
@@ -223,8 +256,10 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             assignJobStatus job status
             
             match status with
-            | JobStatus.Posted | JobStatus.Active -> 
-                job.InitializationTime <- nullable DateTimeOffset.UtcNow
+            | JobStatus.Posted ->
+                job.CreationTime <- nullable DateTimeOffset.UtcNow
+            | JobStatus.Active -> 
+                job.StartTime <- nullable DateTimeOffset.UtcNow
             | JobStatus.Completed | JobStatus.Cancelled -> 
                 job.CompletionTime <- nullable DateTimeOffset.UtcNow
             | _ -> ()
@@ -239,7 +274,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
     member this.List(pid : string) =
         async {
             let! jobs = Table.queryPK<JobRecord> config config.RuntimeTable (mkPartitionKey pid)
-            return jobs |> Seq.map (fun job -> new JobInfo(config, job))
+            return jobs |> Seq.map (fun job -> new Job(config, job))
         }
 
     member this.Heartbeat(pid, jobId) =

@@ -10,7 +10,7 @@ open MBrace.Azure
 type internal FaultHandler () =
 
     /// Fault job : used for job execution errors.
-    static member FaultJobAsync(job : Job, message, state : RuntimeState, fault : Exception) =
+    static member FaultJobAsync(job : JobItem, message, state : RuntimeState, fault : Exception) =
         async {
             state.Logger.Logf "Failed to execute Job '%s'\n%A" job.JobId fault
             state.Logger.Logf "Faulted message : Abandon."

@@ -21,7 +21,7 @@ let inline private withCancellationToken (cts : ICloudCancellationToken) (ctx : 
 let private asyncFromContinuations f =
     Cloud.FromContinuations(fun ctx cont -> JobExecutionMonitor.ProtectAsync ctx (f ctx cont))
         
-let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations : seq<#Cloud<'T> * IWorkerRef option>) =
+let Parallel (state : RuntimeState) (parentJob : JobItem) dependencies (computations : seq<#Cloud<'T> * IWorkerRef option>) =
     asyncFromContinuations(fun ctx cont -> async {
         match (try Seq.toArray computations |> Choice1Of2 with e -> Choice2Of2 e) with
         | Choice2Of2 e -> cont.Exception ctx (ExceptionDispatchInfo.Capture e)
@@ -87,7 +87,7 @@ let Parallel (state : RuntimeState) (parentJob : Job) dependencies (computations
              
             JobExecutionMonitor.TriggerCompletion ctx })
 
-let Choice (state : RuntimeState) (parentJob : Job) dependencies (computations : seq<#Cloud<'T option> * IWorkerRef option>)  =
+let Choice (state : RuntimeState) (parentJob : JobItem) dependencies (computations : seq<#Cloud<'T option> * IWorkerRef option>)  =
     asyncFromContinuations(fun ctx cont -> async {
         match (try Seq.toArray computations |> Choice1Of2 with e -> Choice2Of2 e) with
         | Choice2Of2 e -> cont.Exception ctx (ExceptionDispatchInfo.Capture e)

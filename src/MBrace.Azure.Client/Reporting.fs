@@ -15,25 +15,25 @@ type internal JobReporter() =
     static let onNull (value : Nullable<'T>) = 
         if value.HasValue then value.Value.ToString() else "N/A" 
 
-    static let template : Field<JobInfo> list = 
+    static let template : Field<Job> list = 
         [ Field.create "Id" Left (fun p -> p.Id)
           Field.create "Type" Right (fun p -> p.JobType)
           Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
           Field.create "Return Type" Left (fun p -> p.ReturnType) 
           Field.create "Timestamp" Left (fun p -> p.Timestamp)
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
-          Field.create "Delivery Count" Left (fun p -> p.DeliveryCount)
-          Field.create "Initialization" Left (fun p -> onNull p.InitializationTime) 
-          Field.create "CompletionTime" Left (fun p -> onNull p.CompletionTime) 
+          Field.create "# Deliveries" Left (fun p -> p.DeliveryCount)
+          Field.create "Created" Left (fun p -> onNull p.CreationTime) 
+          Field.create "Completed" Left (fun p -> onNull p.CompletionTime) 
         ]
     
-    static member Report(jobs : JobInfo seq, title, borders) = 
+    static member Report(jobs : Job seq, title, borders) = 
         let ps = jobs 
                  |> Seq.sortBy (fun p -> p.Timestamp, p.Status, p.JobType)
                  |> Seq.toList
         Record.PrettyPrint(template, ps, title, borders)
 
-    static member ReportTreeView(jobs : JobInfo seq, title) =
+    static member ReportTreeView(jobs : Job seq, title) =
         let sb = new StringBuilder()
         let _ = sb.AppendLine(title)
 
@@ -41,10 +41,10 @@ type internal JobReporter() =
 
         let root = jobs |> Seq.find (fun j -> j.JobType = Root)
 
-        let child (current : JobInfo) =
+        let child (current : Job) =
             jobs |> Seq.filter (fun j -> j.ParentId = current.Id)
 
-        let rec treeview (current : JobInfo) depth : unit =
+        let rec treeview (current : Job) depth : unit =
             if depth > 0 then
                 for i = 0 to 4 * (depth-1) - 1 do 
                     ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
