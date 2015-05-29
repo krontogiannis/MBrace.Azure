@@ -85,8 +85,8 @@ and [<AutoSerializable(false)>]
         async {
             let inline logf fmt = Printf.ksprintf (staticConfiguration.State.Logger :> ICloudLogger).Log fmt
 
-            if msg.DeliveryCount = 1 then
-                do! staticConfiguration.State.ProcessManager.AddActiveJob(jobItem.ProcessInfo.Id)
+//            if msg.DeliveryCount = 1 then
+//                do! staticConfiguration.State.ProcessManager.AddActiveJob(jobItem.ProcessInfo.Id)
 
             logf "Loading assemblies"
             let! jobResult = Async.Catch <| async {
@@ -118,12 +118,13 @@ and [<AutoSerializable(false)>]
                 match result with
                 | Choice1Of2 true -> 
                     do! staticConfiguration.State.JobQueue.CompleteAsync(msg)
-                    do! staticConfiguration.State.ProcessManager.AddCompletedJob(job.ProcessInfo.Id)
+                    //do! staticConfiguration.State.ProcessManager.AddCompletedJob(job.ProcessInfo.Id)
+                    do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Completed, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount)
                     logf "Completed job\n%s\nTime : %O" (string job) sw.Elapsed
                 | Choice1Of2 false -> 
                     do! staticConfiguration.State.JobQueue.CompleteAsync(msg)
-                    do! staticConfiguration.State.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
-                    //do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Suspended, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount)
+                    //do! staticConfiguration.State.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
+                    do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Completed, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount)
                     logf "Faulted job\n%s\nTime : %O" (string job) sw.Elapsed
                 | Choice2Of2 e -> 
                     do! FaultHandler.FaultJobAsync(job, msg, staticConfiguration.State, e)

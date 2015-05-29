@@ -41,9 +41,7 @@ runtime.AttachClientLogger(new ConsoleLogger())
 runtime.AttachLocalWorker(4, 16)
 //---
 
-
-
-let ps = runtime.CreateProcess <| cloud { return 42 }    
+let ps = runtime.CreateProcess <| cloud { return 42 }
 
 ps.AwaitResult()
 
@@ -60,7 +58,7 @@ let ps =
     |> runtime.CreateProcess 
 
 ps.AwaitResult()
-ps.ShowJobsTree()
+//ps.ShowJobsTree()
 ps.ShowJobs()
 
 ps.GetJobs()

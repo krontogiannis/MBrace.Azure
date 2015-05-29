@@ -14,7 +14,7 @@ type internal FaultHandler () =
         async {
             state.Logger.Logf "Failed to execute Job '%s'\n%A" job.JobId fault
             state.Logger.Logf "Faulted message : Abandon."
-            do! state.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
+            //do! state.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
             do! state.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Inactive, state.WorkerManager.Current.Id)
             do! state.JobQueue.AbandonAsync(message)
         }
@@ -37,7 +37,7 @@ type internal FaultHandler () =
                 do! state.ProcessManager.SetFaulted(job.ProcessInfo.Id)
             
             state.Logger.Logf "Faulted message : Complete."
-            do! state.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
+            //do! state.ProcessManager.AddFaultedJob(job.ProcessInfo.Id)
             do! state.JobQueue.CompleteAsync(message)
         }
 
@@ -61,7 +61,7 @@ type internal FaultHandler () =
             do! state.ProcessManager.SetFaulted(psInfo.Id)
             
             state.Logger.Logf "Faulted message : Complete."
-            do! state.ProcessManager.AddFaultedJob(psInfo.Id)
+            //do! state.ProcessManager.AddFaultedJob(psInfo.Id)
             do! state.JobQueue.CompleteAsync(message)
         }
    

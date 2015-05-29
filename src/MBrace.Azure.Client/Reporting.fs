@@ -34,53 +34,33 @@ type internal JobReporter() =
                  |> Seq.toList
         Record.PrettyPrint(template, ps, title, borders)
 
-    static member ReportTreeView(jobs : Job seq, title) =
-        let sb = new StringBuilder()
-        let _ = sb.AppendLine(title)
-
-        let append (job : Job) =
-            let sb = sb.AppendFormat("{0}...{1} ",job.Id.Substring(0,7), job.Id.Substring(job.Id.Length - 3))
-                       .AppendFormat("{0} {1} {2} ", job.JobType, getHumanReadableByteSize job.JobSize, job.Status)
-            let sb = if job.CompletionTime.HasValue then
-                        sb.Append(job.CompletionTime.Value - job.StartTime.Value)
-                     else sb
-            sb.AppendLine()
-
-        let root = jobs |> Seq.find (fun j -> j.JobType = Root)
-
-        let child (current : Job) =
-            jobs |> Seq.filter (fun j -> j.ParentId = current.Id)
-
-        let rec treeview (current : Job) depth : unit =
-            if depth > 0 then
-                for i = 0 to 4 * (depth-1) - 1 do 
-                    ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
-                let _ = sb.Append("├───") // fancy
-                ()
-            let _ = append current
-            child current |> Seq.iter (fun j -> treeview j (depth + 1))
-        treeview root 0
-        sb.ToString()
-
-
-type internal ProcessReporter() = 
-    static let template : Field<ProcessRecord> list = 
-        [ Field.create "Name" Left (fun p -> p.Name)
-          Field.create "Process Id" Right (fun p -> p.Id)
-          Field.create "Status" Right (fun p -> p.State)
-          Field.create "Completed" Left (fun p -> p.Completed)
-          Field.create "Execution Time" Left (fun p -> if p.Completed.GetValueOrDefault() then p.CompletionTime ?-? p.InitializationTime else DateTimeOffset.UtcNow -? p.InitializationTime)
-          Field.create "Jobs" Center (fun p -> sprintf "%3d / %3d / %3d / %3d"  p.ActiveJobs.Value p.FaultedJobs.Value p.CompletedJobs.Value p.TotalJobs.Value)
-          Field.create "Result Type" Left (fun p -> p.TypeName) 
-          Field.create "Start Time" Left (fun p -> p.InitializationTime)
-          Field.create "Completion Time" Left (fun p -> p.CompletionTime )
-        ]
-    
-    static member Report(processes : ProcessRecord seq, title, borders) = 
-        let ps = processes 
-                 |> Seq.sortBy (fun p -> p.InitializationTime.Value)
-                 |> Seq.toList
-        sprintf "%s\nJobs : Active / Faulted / Completed / Total\n" <| Record.PrettyPrint(template, ps, title, borders)
+//    static member ReportTreeView(jobs : Job seq, title) =
+//        let sb = new StringBuilder()
+//        let _ = sb.AppendLine(title)
+//
+//        let append (job : Job) =
+//            let sb = sb.AppendFormat("{0}...{1} ",job.Id.Substring(0,7), job.Id.Substring(job.Id.Length - 3))
+//                       .AppendFormat("{0} {1} {2} ", job.JobType, getHumanReadableByteSize job.JobSize, job.Status)
+//            let sb = if job.CompletionTime.HasValue then
+//                        sb.Append(job.CompletionTime.Value - job.StartTime.Value)
+//                     else sb
+//            sb.AppendLine()
+//
+//        let root = jobs |> Seq.find (fun j -> j.JobType = Root)
+//
+//        let child (current : Job) =
+//            jobs |> Seq.filter (fun j -> j.ParentId = current.Id)
+//
+//        let rec treeview (current : Job) depth : unit =
+//            if depth > 0 then
+//                for i = 0 to 4 * (depth-1) - 1 do 
+//                    ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
+//                let _ = sb.Append("├───") // fancy
+//                ()
+//            let _ = append current
+//            child current |> Seq.iter (fun j -> treeview j (depth + 1))
+//        treeview root 0
+//        sb.ToString()
 
 type internal WorkerReporter() = 
     static let template : Field<WorkerRef> list = 

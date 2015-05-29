@@ -25,6 +25,9 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
         new Live<_>((fun () -> pmon.GetProcess(pid)), initial = Choice2Of2(exn ("Process not initialized")), 
                     keepLast = true, interval = 500)
 
+    let jobs =
+        new Live<_>((fun () -> jman.List(pid)), initial = Choice2Of2(exn ("Process not initialized")), keepLast = true, interval = 500)
+
     let logger = new ProcessLogger(config, pid)
     let dcts = lazy DistributedCancellationTokenSource.FromPath(config, proc.Value.CancellationPartitionKey, proc.Value.CancellationRowKey)
 
@@ -48,6 +51,9 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
     abstract AwaitResultBoxed : unit -> obj
     /// Asynchronously waits for the process result.
     abstract AwaitResultBoxedAsync : unit -> Async<obj>
+
+    /// Process state.
+    member this.Status = enum<ProcessStatus> proc.Value.Status.Value
 
     /// Returns process' CancellationTokenSource.
     member this.CancellationTokenSource = dcts.Value :> ICloudCancellationTokenSource
@@ -75,16 +81,19 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
     member this.Completed : bool = proc.Value.Completed.Value
 
     /// Returns the number of tasks created by this process and are currently executing.
-    member this.ActiveJobs : int = proc.Value.ActiveJobs.Value
+    member this.ActiveJobs : int = 
+        jobs.Value |> Seq.filter (fun j -> j.Status = JobStatus.Active) |> Seq.length
 
     /// Returns the number of tasks created by this process.
-    member this.TotalJobs : int = proc.Value.TotalJobs.Value
+    member this.TotalJobs : int =
+        jobs.Value |> Seq.length
 
     /// Returns the number of tasks completed by this process.
-    member this.CompletedJobs : int = proc.Value.CompletedJobs.Value
+    member this.CompletedJobs : int =
+        jobs.Value |> Seq.filter (fun j -> j.Status = JobStatus.Completed) |> Seq.length
 
     /// Returns the number of tasks failed to execute by this process.
-    member this.FaultedJobs : int = proc.Value.FaultedJobs.Value
+    //member this.FaultedJobs : int = proc.Value.FaultedJobs.Value
 
     /// Sends a kill signal for this process.
     member this.Kill() = Async.RunSync(this.KillAsync())
@@ -106,16 +115,34 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
         printf "%s" <| LogReporter.Report(this.GetLogs(?fromDate = fromDate, ?toDate = toDate), sprintf "Process %s logs" pid, false)
 
     /// Prints a detailed report for this process.
-    member this.ShowInfo () = printf "%s" <| ProcessReporter.Report([proc.Value], "Process", false)
+    member this.ShowInfo () = printf "%s" <| ProcessReporter.Report([this], "Process", false)
 
-    member this.GetJobsAsync() = jman.List(pid)
-
-    member this.GetJobs() = Async.RunSync(this.GetJobsAsync())
+    member this.GetJobs() = jobs.Value //Async.RunSync(this.GetJobsAsync())
 
     member this.ShowJobs() = printfn "%s" <| JobReporter.Report(this.GetJobs(), sprintf "Jobs for process %s" pid, false)
 
-    member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
+    //member this.GetJobsAsync() = jobs.Value //jman.List(pid)
+    //member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
         
+and internal ProcessReporter() = 
+    static let template : Field<Process> list = 
+        [ Field.create "Name" Left (fun p -> p.Name)
+          Field.create "Process Id" Right (fun p -> p.Id)
+          Field.create "Status" Right (fun p -> p.Status)
+          Field.create "Completed" Left (fun p -> p.Completed)
+          Field.create "Execution Time" Left (fun p -> p.ExecutionTime)
+          Field.create "Jobs" Center (fun p -> sprintf "%3d / %3d / %3d"  p.ActiveJobs p.CompletedJobs p.TotalJobs)
+          Field.create "Result Type" Left (fun p -> p.ProcessEntity.Value.TypeName) 
+          Field.create "Start Time" Left (fun p -> p.InitializationTime)
+          Field.create "Completion Time" Left (fun p -> p.ProcessEntity.Value.CompletionTime)
+        ]
+    
+    static member Report(processes : seq<Process>, title, borders) = 
+        let ps = processes 
+                 |> Seq.sortBy (fun p -> p.InitializationTime)
+                 |> Seq.toList
+        sprintf "%s\nJobs : Active / Completed / Total\n" <| Record.PrettyPrint(template, ps, title, borders)
+
 
 [<AutoSerializable(false)>]
 /// Represents a cloud process.

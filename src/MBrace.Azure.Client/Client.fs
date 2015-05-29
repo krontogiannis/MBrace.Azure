@@ -429,12 +429,12 @@ type Runtime private (clientId, config : Configuration) =
     /// </summary>
     /// <param name="pid">Process Id</param>
     member this.ShowProcess(pid) =
-        let ps = this.GetProcess(pid).ProcessEntity.Value
+        let ps = this.GetProcess(pid)//.ProcessEntity.Value
         printf "%s" <| ProcessReporter.Report([ps], "Process", false)
 
     /// Print all process information.
     member this.ShowProcesses () = 
-        let ps = pmon.GetProcesses() |> Async.RunSync
+        let ps = this.GetProcesses() //|> Async.RunSync
         printf "%s" <| ProcessReporter.Report(ps, "Processes", false)
 
     /// <summary>

@@ -8,10 +8,12 @@ open System
 open Microsoft.WindowsAzure.Storage.Table
 open MBrace.Azure.Runtime.Utilities
 
+[<AllowNullLiteral>]
 type JobRecord (processId, jobId) =
     inherit TableEntity(processId, jobId)
     member val Id : string = jobId with get, set
     member val ParentId : string = null with get, set
+    member val ProcessId : string = null with get, set
     
     member val Kind = Nullable<int>() with get, set
     member val Affinity : string = null with get, set
@@ -70,8 +72,8 @@ type JobStatus =
     | Active    = 2
     | Inactive  = 3
     | Completed = 4
-    | Cancelled = 5
-    | Suspended = 6
+    //| Cancelled = 5
+    //| Suspended = 6
 
 // Stored in table.
 type private JobKind =
@@ -157,6 +159,8 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
 
     /// Job unique identifier.
     member this.Id = job.Id
+    /// Job's PID.
+    member this.ProcessId = job.ProcessId
     /// Parent job identifier.
     member this.ParentId = job.ParentId
     /// Type of this job.
@@ -186,18 +190,18 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     /// Try get job's partial result.
     member this.TryGetResultAsync<'T>() = 
         async {
-            let! result = 
                 match this.JobType with
                 | Root | Task | TaskAffined _ -> 
-                    ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
+                    let! result = ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
+                    match result with
+                    | Some r -> return Some r.Value
+                    | None -> return None
                 | Parallel(i,m) | ParallelAffined(_,i,m) ->
-                    ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
+                    return! ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
                 | Choice _ | ChoiceAffined _ ->
-                    raise(NotSupportedException("Partial result not supported for Choice."))
-            match result with
-            | Some r -> return Some r.Value
-            | None -> return None
+                    return! Async.Raise(NotSupportedException("Partial result not supported for Choice."))
         }
+        
 
 namespace MBrace.Azure.Runtime.Info
 
@@ -211,8 +215,8 @@ open Microsoft.WindowsAzure.Storage.Table
 
 [<AutoSerializableAttribute(false)>]
 type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
-    static let mkPartitionKey pid = sprintf "jobInfo:%s" pid
-
+    static let mkPartitionKey pid = sprintf "job:%s" pid
+    
     static let heartBeatInterval = 30000
 
     static let mkRecord pid jobId jobType returnType parentId size resPk resRk =
@@ -261,9 +265,9 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             | JobStatus.Active -> 
                 job.StartTime <- nullable DateTimeOffset.UtcNow
             | JobStatus.Completed 
-            | JobStatus.Cancelled 
-            | JobStatus.Suspended ->
-                job.CompletionTime <- nullable DateTimeOffset.UtcNow
+//            | JobStatus.Cancelled 
+//            | JobStatus.Suspended ->
+//                job.CompletionTime <- nullable DateTimeOffset.UtcNow
             | _ -> ()
 
             deliveryCount |> Option.iter (fun dc -> job.DeliveryCount <- nullable dc)
@@ -292,5 +296,14 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
                 | Choice2Of2 e -> logger.Logf "Failed to give heartbeat for Job %s : %+A" jobId e
             logger.Logf "Stopped heartbeat loop for Job %s" jobId
         } |> Async.StartChild
+
+    member this.Get(pid : string, jobId : string) =
+        async {
+            let! job = Table.read<JobRecord> config config.RuntimeTable (mkPartitionKey pid) jobId
+            if job <> null then
+                return new Job(config, job)
+            else
+                return failwith "Job %A not found" jobId
+        }
 
     static member Create (config : ConfigurationId, logger) = new JobManager(config, logger)

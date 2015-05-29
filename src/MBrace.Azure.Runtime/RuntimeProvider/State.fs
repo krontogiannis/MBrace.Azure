@@ -96,23 +96,7 @@ with
                 let wf = fst wfs.[i]
                 let affinity = match snd wfs.[i] with Some wr -> Some wr.Id | None -> None
                 let startJob ctx =
-                    let cont = { 
-                        Success =
-                            fun ctx t -> 
-                                scFactory i ctx t  
-                                ctx.Resources.Resolve<JobManager>().Update(pid, jobId, JobStatus.Completed)
-                                |> JobExecutionMonitor.ProtectAsync ctx
-                        Exception = 
-                            fun ctx e ->
-                                ec ctx e
-                                ctx.Resources.Resolve<JobManager>().Update(pid, jobId, JobStatus.Completed)
-                                |> JobExecutionMonitor.ProtectAsync ctx
-                        Cancellation = 
-                            fun ctx c ->
-                                cc ctx c
-                                ctx.Resources.Resolve<JobManager>().Update(pid, jobId, JobStatus.Cancelled)
-                                |> JobExecutionMonitor.ProtectAsync ctx
-                    }
+                    let cont = { Success = scFactory i ; Exception = ec; Cancellation = cc }
                     Cloud.StartWithContinuations(wf, cont, ctx)
                 let jobType aff =
                     match distribType, aff with
@@ -146,30 +130,14 @@ with
             do! this.JobQueue.EnqueueBatch<PickledJob>(jobs, pid = psInfo.Id)
             let ids = jobs |> Seq.map (fun (j,_) -> j.JobId)
             do! this.JobManager.UpdateBatch(psInfo.Id, ids, JobStatus.Posted)
-            do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id, jobs.Length)
+            //do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id, jobs.Length)
         }
 
     member private this.EnqueueJob(psInfo : ProcessInfo, jobId, dependencies, cts, fp, sc, ec, cc, wf : Cloud<'T>, jobType : JobType, parentJobId, resultCell) : Async<unit> =
         async {
             let pid = psInfo.Id
             let startJob ctx =
-                let cont = { 
-                    Success = 
-                        fun ctx t ->
-                            sc ctx t
-                            ctx.Resources.Resolve<JobManager>().Update(pid, jobId, JobStatus.Completed)
-                            |> JobExecutionMonitor.ProtectAsync ctx
-                    Exception = 
-                        fun ctx e ->
-                            ec ctx e
-                            ctx.Resources.Resolve<JobManager>().Update(pid, jobId, JobStatus.Completed)
-                            |> JobExecutionMonitor.ProtectAsync ctx
-                    Cancellation = 
-                        fun ctx c -> 
-                            cc ctx c
-                            ctx.Resources.Resolve<JobManager>().Update(pid, jobId, JobStatus.Completed)
-                            |> JobExecutionMonitor.ProtectAsync ctx
-                }
+                let cont = { Success = sc; Exception = ec; Cancellation = cc }
                 Cloud.StartWithContinuations(wf, cont, ctx)
             let affinity = match jobType with TaskAffined a -> Some a | _ -> None
             let pickle value = VagabondRegistry.Instance.Pickler.PickleTyped(value)
@@ -199,7 +167,7 @@ with
             this.Logger.Logf "Job Enqueue completed. Setting Job as posted."
             do! this.JobManager.Update(psInfo.Id, jobId, JobStatus.Posted)
             this.Logger.Logf "Job %s posted." jobId
-            do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id)
+            //do! this.ProcessManager.IncreaseTotalJobs(pid)
         }
 
     /// Schedules a cloud workflow as an ICloudTask.
