@@ -429,13 +429,22 @@ type Runtime private (clientId, config : Configuration) =
     /// </summary>
     /// <param name="pid">Process Id</param>
     member this.ShowProcess(pid) =
-        let ps = this.GetProcess(pid)//.ProcessEntity.Value
-        printf "%s" <| ProcessReporter.Report([ps], "Process", false)
+        async {
+            let! ps = pmon.GetProcess(pid)
+            let! jobs = state.JobManager.List(ps.Id)
+            Console.WriteLine(ProcessReporter.Report([ps, jobs], "Process", false))
+        }
 
     /// Print all process information.
     member this.ShowProcesses () = 
-        let ps = this.GetProcesses() //|> Async.RunSync
-        printf "%s" <| ProcessReporter.Report(ps, "Processes", false)
+        async {
+            let! ps = pmon.GetProcesses()
+            let! jobs = 
+                ps 
+                |> Array.map (fun p -> state.JobManager.List(p.Id))
+                |> Async.Parallel
+            Console.WriteLine(ProcessReporter.Report(Seq.zip ps jobs, "Processes", false))
+        } |> Async.RunSync
 
     /// <summary>
     /// Delete runtime records for given process.

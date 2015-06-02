@@ -16,6 +16,7 @@ open MBrace.Azure.Runtime
 open MBrace.Azure.Runtime.Info
 open MBrace.Azure.Runtime.Utilities
 open MBrace.Azure.Runtime.Primitives
+open Microsoft.FSharp.Linq
 
 [<AutoSerializable(false); AbstractClass>]
 /// Represents a cloud process.
@@ -123,25 +124,34 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
 
     //member this.GetJobsAsync() = jobs.Value //jman.List(pid)
     //member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
-        
+     
 and internal ProcessReporter() = 
-    static let template : Field<Process> list = 
-        [ Field.create "Name" Left (fun p -> p.Name)
-          Field.create "Process Id" Right (fun p -> p.Id)
-          Field.create "Status" Right (fun p -> p.Status)
-          Field.create "Completed" Left (fun p -> p.Completed)
-          Field.create "Execution Time" Left (fun p -> p.ExecutionTime)
-          Field.create "Jobs" Center (fun p -> sprintf "%3d / %3d / %3d"  p.ActiveJobs p.CompletedJobs p.TotalJobs)
-          Field.create "Result Type" Left (fun p -> p.ProcessEntity.Value.TypeName) 
-          Field.create "Start Time" Left (fun p -> p.InitializationTime)
-          Field.create "Completion Time" Left (fun p -> p.ProcessEntity.Value.CompletionTime)
+    static let template : Field<ProcessRecord * seq<Job>> list = 
+        [ Field.create "Name" Left (fun (p,_) -> p.Name)
+          Field.create "Process Id" Right (fun (p,_) -> p.Id)
+          Field.create "Status" Right (fun (p,_) -> p.Status)
+          Field.create "Completed" Left (fun (p,_) -> p.Completed)
+          Field.create "Execution Time" Left (fun (p,_) -> if p.Completed.GetValueOrDefault() then p.CompletionTime ?-? p.InitializationTime else DateTimeOffset.UtcNow -? p.InitializationTime)
+          Field.create "Jobs" Center (fun (_,jobs) -> 
+            let total = Seq.length jobs
+            let count s = jobs |> Seq.filter (fun j -> j.Status = s) |> Seq.length
+            sprintf "%3d / %3d / %3d" (count JobStatus.Active) (count JobStatus.Completed) total)
+          Field.create "Result Type" Left (fun (p,_) -> p.TypeName) 
+          Field.create "Start Time" Left (fun (p,_) -> p.InitializationTime)
+          Field.create "Completion Time" Left (fun (p,_) -> p.CompletionTime)
         ]
-    
-    static member Report(processes : seq<Process>, title, borders) = 
+
+    /// No need to have a Process obj (having dependencies downloaded, etc)    
+    static member Report(processes : seq<ProcessRecord * seq<Job>>, title, borders) =
         let ps = processes 
-                 |> Seq.sortBy (fun p -> p.InitializationTime)
+                 |> Seq.sortBy (fun (p,_) -> p.InitializationTime.GetValueOrDefault())
                  |> Seq.toList
         sprintf "%s\nJobs : Active / Completed / Total\n" <| Record.PrettyPrint(template, ps, title, borders)
+
+    static member Report(processes : seq<Process>, title, borders) = 
+        let ps = processes |> Seq.map (fun p -> p.ProcessEntity.Value, p.GetJobs()) |> Seq.toArray
+        ProcessReporter.Report(ps, title, borders)
+
 
 
 [<AutoSerializable(false)>]

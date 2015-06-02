@@ -43,18 +43,7 @@ runtime.AttachLocalWorker(4, 16)
 
 let ps = runtime.CreateProcess <| cloud { return 42 }
 
-type Foo = Foo of int
-
-let ps = runtime.CreateProcess <| cloud { return Foo(42) }
-let ps = runtime.CreateProcess <| cloud { let f = Foo(42) in return 42 }
-
-ps.AwaitResult()
-
 let ps = runtime.GetProcesses()
-
-let p = ps.[1]
-p.ShowInfo()
-p.AwaitResultBoxed()
 runtime.ShowProcesses()
 
 
