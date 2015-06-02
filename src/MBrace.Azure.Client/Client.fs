@@ -419,7 +419,7 @@ type Runtime private (clientId, config : Configuration) =
                 let deps = e.UnpickleDependencies()
                 let! localAssemblies = state.AssemblyManager.DownloadDependencies deps
                 let _ = state.AssemblyManager.LoadAssemblies localAssemblies
-                let ps = Process.Create(configuration.ConfigurationId, pid, e.UnpickleType(), pmon)
+                let ps = Process.Create(configuration.ConfigurationId, pid, e.UnpickleType(), pmon, state.JobManager)
                 ProcessCache.Add(ps)
                 return ps
         }

@@ -21,18 +21,25 @@ type internal JobReporter() =
           Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
           Field.create "Return Type" Left (fun p -> p.ReturnType) 
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
-          Field.create "# retries" Left (fun p -> p.DeliveryCount - 1)
+          Field.create "Retries" Left (fun p -> p.DeliveryCount - 1)
           Field.create "Posted" Left (fun p -> p.CreationTime) 
           Field.create "Started" Left (fun p -> onNull p.StartTime) 
           Field.create "Completed" Left (fun p -> onNull p.CompletionTime) 
           Field.create "Timestamp" Left (fun p -> p.Timestamp)
         ]
     
-    static member Report(jobs : Job seq, title, borders) = 
+    static member Report(jobs : Job seq, title) = 
         let ps = jobs 
-                 |> Seq.sortBy (fun p -> p.Timestamp, p.Status, p.JobType)
+                 |> Seq.sortBy (fun p -> p.CreationTime, p.Timestamp)
                  |> Seq.toList
-        Record.PrettyPrint(template, ps, title, borders)
+        let sb = 
+            jobs 
+            |> Seq.countBy (fun j -> j.Status)
+            |> Seq.sortBy fst
+            |> Seq.fold (fun (sb : StringBuilder) (s,i) -> sb.AppendFormat("{0} : {1}\n", s , i)) (StringBuilder().AppendLine(title))
+
+        sb.AppendLine()
+          .AppendLine(Record.PrettyPrint(template, ps)).ToString()
 
 //    static member ReportTreeView(jobs : Job seq, title) =
 //        let sb = new StringBuilder()

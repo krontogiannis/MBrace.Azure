@@ -215,11 +215,11 @@ with
             match ct with
             | None -> this.ResourceFactory.RequestCancellationTokenSource(psInfo.Id, metadata = jobId, elevate = true)
             | Some ct -> async { return ct :?> DistributedCancellationTokenSource }
-        
+        let returnTypeDependencies = this.AssemblyManager.ComputeDependencies(wf.GetType())
         let requests = this.ResourceFactory.GetResourceBatchForProcess(psInfo.Id)
         let resultCell = requests.RequestResultCell<'T>(jobId)
         this.Logger.Logf "Creating Process Record for %s" psInfo.Id
-        do! Async.Parallel [| this.ProcessManager.CreateRecord(psInfo.Id, psInfo.Name, typeof<'T>, dependencies, cts, resultCell.RowKey)
+        do! Async.Parallel [| this.ProcessManager.CreateRecord(psInfo.Id, psInfo.Name, typeof<'T>, returnTypeDependencies, cts, resultCell.RowKey)
                               requests.CommitAsync() |]
             |> Async.Ignore
 

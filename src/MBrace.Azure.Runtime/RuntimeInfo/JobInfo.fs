@@ -184,6 +184,7 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     /// Approximation of the job's serialized size in bytes.
     member this.JobSize = job.Size.GetValueOrDefault()
 
+
     /// Try get job's partial result.
     member this.TryGetResult<'T>() = Async.RunSync(this.TryGetResultAsync<'T>())
 

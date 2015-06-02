@@ -119,7 +119,7 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
 
     member this.GetJobs() = jobs.Value //Async.RunSync(this.GetJobsAsync())
 
-    member this.ShowJobs() = printfn "%s" <| JobReporter.Report(this.GetJobs(), sprintf "Jobs for process %s" pid, false)
+    member this.ShowJobs() = printfn "%s" <| JobReporter.Report(this.GetJobs(), sprintf "Jobs for process %A" pid)
 
     //member this.GetJobsAsync() = jobs.Value //jman.List(pid)
     //member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
@@ -169,11 +169,11 @@ type Process<'T> internal (config, pid : string, pmon : ProcessManager, jman : J
             return r.Value
         }
 
-    static member internal Create(config : ConfigurationId, pid : string, ty : Type, pmon : ProcessManager) : Process =
+    static member internal Create(config : ConfigurationId, pid : string, ty : Type, pmon : ProcessManager, jman : JobManager) : Process =
         let processT = typeof<Process<_>>.GetGenericTypeDefinition().MakeGenericType [| ty |]
         let flags = BindingFlags.NonPublic ||| BindingFlags.Instance
         let culture = System.Globalization.CultureInfo.InvariantCulture
-        Activator.CreateInstance(processT, flags, null, [|config :> obj; pid :> obj ; pmon :> obj |], culture) :?> Process
+        Activator.CreateInstance(processT, flags, null, [|config :> obj; pid :> obj ; pmon :> obj; jman :> obj |], culture) :?> Process
 
 
 [<AutoSerializable(false); Sealed>]
