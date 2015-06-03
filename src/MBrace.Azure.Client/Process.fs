@@ -129,7 +129,7 @@ and internal ProcessReporter() =
     static let template : Field<ProcessRecord * seq<Job>> list = 
         [ Field.create "Name" Left (fun (p,_) -> p.Name)
           Field.create "Process Id" Right (fun (p,_) -> p.Id)
-          Field.create "Status" Right (fun (p,_) -> p.Status)
+          Field.create "Status" Right (fun (p,_) -> enum<ProcessStatus> p.Status.Value)
           Field.create "Completed" Left (fun (p,_) -> p.Completed)
           Field.create "Execution Time" Left (fun (p,_) -> if p.Completed.GetValueOrDefault() then p.CompletionTime ?-? p.InitializationTime else DateTimeOffset.UtcNow -? p.InitializationTime)
           Field.create "Jobs" Center (fun (_,jobs) -> 

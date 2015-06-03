@@ -42,9 +42,36 @@ runtime.AttachLocalWorker(4, 16)
 //---
 
 let ps = runtime.CreateProcess <| cloud { return 42 }
+ps.ShowJobs()
 
-let ps = runtime.GetProcesses()
 runtime.ShowProcesses()
+runtime.ShowWorkers()
+
+
+open System
+open System.Collections.Generic
+
+type Factory<'T> = Async<seq<string * 'T>>
+
+type RecordCache<'T> () =
+    let records = new Dictionary<string, 'T>()
+    let factories = new Dictionary<string, Factory<'T>>()
+
+    let updateLoop =
+        let rec loop () = async {
+            ()
+        }
+
+
+    member this.AddFactory(key : string, factory : Factory<'T>) =
+        factories.Add(key, factory)
+
+
+
+
+
+
+
 
 
 
@@ -90,7 +117,6 @@ let ps =
     } |> runtime.CreateProcess
 
 ps.ShowJobs()
-ps.ShowJobsTree()
 
 
 
