@@ -23,7 +23,7 @@ type internal JobReporter() =
           Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
           Field.create "Return Type" Left (fun p -> p.ReturnType) 
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
-          Field.create "Retries" Left (fun p -> p.DeliveryCount - 1)
+          Field.create "Deliveries" Left (fun p -> p.DeliveryCount)
           Field.create "Posted" Left (fun p -> p.CreationTime) 
           Field.create "Started" Left (fun p -> optionToString p.StartTime) 
           Field.create "Completed" Left (fun p -> optionToString p.CompletionTime) 

@@ -302,7 +302,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             if job <> null then
                 return new Job(config, job)
             else
-                return failwith "Job %A not found" jobId
+                return failwithf "Job %A not found" jobId
         }
 
     static member Create (config : ConfigurationId, logger) = new JobManager(config, logger)
