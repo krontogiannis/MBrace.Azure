@@ -7,26 +7,13 @@ open MBrace.Core.Internals
 /// Represents current worker status.
 type WorkerStatus = 
     /// Worker initialization.
-    | Initializing
+    | Initializing = 0
     /// Worker successfully started.
-    | Running
+    | Running      = 1
     /// Worker stopped.
-    | Stopped
+    | Stopped      = 2
     /// Unexpected worker exception.
-    | Faulted of exn
-
-    override this.ToString() =
-        match this with
-        | Initializing  -> "Initializing"
-        | Running   -> "Running"
-        | Stopped   -> "Stopped"
-        | Faulted _ -> "Faulted"
-
-    static member Pickle (status : WorkerStatus) = MBrace.Azure.Runtime.Configuration.Pickler.Pickle(status)
-
-    static member UnPickle (bytes) =
-        if bytes = null then Unchecked.defaultof<_> else MBrace.Azure.Runtime.Configuration.Pickler.UnPickle<WorkerStatus>(bytes)
-
+    | Faulted      = 3
 
 namespace MBrace.Azure.Runtime.Info
 
@@ -64,7 +51,8 @@ type WorkerRecord(pk, id, hostname : string, pid : Nullable<int>, pname : string
     member val NetworkUp          = Nullable<double>() with get, set
     member val NetworkDown        = Nullable<double>() with get, set
     member val Version            = Unchecked.defaultof<string> with get, set
-    member val Status             = Unchecked.defaultof<byte []> with get, set
+    member val Status             = Nullable<int>() with get, set
+    member val Fault              = Unchecked.defaultof<byte []> with get, set
     new () = new WorkerRecord(null, null, null, nullableDefault, null, Unchecked.defaultof<_>)
 
     member this.UpdateCounters(counters : NodePerformanceInfo) =
@@ -150,7 +138,13 @@ type WorkerRef internal (config : ConfigurationId, partitionKey, rowKey) =
     member this.Id : string = getRecord().Id
     
     ///Current worker status.
-    member this.Status : WorkerStatus = WorkerStatus.UnPickle(getRecord().Status)
+    member this.Status : WorkerStatus = enum<WorkerStatus>(getRecord().Status.Value)
+
+    /// Unexpected worker exception, when Status is Faulted.
+    member this.Fault : Exception option = 
+        match getRecord().Fault with
+        | null -> None
+        | bytes -> Some(Configuration.Pickler.UnPickle<Exception>(bytes))
     
     /// Machine's name.
     member this.Hostname : string = getRecord().Hostname
@@ -233,7 +227,6 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
 
     let perfMon = lazy new PerformanceMonitor()
     let mutable current = None : WorkerRecord option
-    let runningPickle = WorkerStatus.Pickle Running
 
     let heartbeatAgent = 
         let maxHeartbeatInterval = TimeSpan.FromSeconds(32.)
@@ -283,7 +276,7 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                         return! loop (Some { Worker = worker; LastHeartBeatFault = fault'; InitialTimeSpan = initialTs; CurrentTimeSpan = currentTs' })
                 | Some(Start(worker, ts)), None ->
                     logger.Logf "Starting heartbeat loop with interval %A" ts
-                    worker.Status <- runningPickle
+                    worker.Status <- nullable(int WorkerStatus.Running)
                     return! loop (Some { Worker = worker; LastHeartBeatFault = false; InitialTimeSpan = ts; CurrentTimeSpan = ts })
                 | Some(SetJobCount(jc)), Some state ->
                     try
@@ -294,7 +287,8 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                     return! loop (Some state)
                 | Some(SetRunning(ch)), Some state ->
                     try
-                        state.Worker.Status <- runningPickle
+                        state.Worker.Status <- nullable(int WorkerStatus.Running)
+                        state.Worker.Fault <- null
                         let! c = Table.replace config table state.Worker
                         current <- Some c
                     with _ -> ()
@@ -302,14 +296,16 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                     return! loop (Some {state with LastHeartBeatFault = false })
                 | Some(SetFaulted(ex)), Some state ->
                     try
-                        state.Worker.Status <- WorkerStatus.Pickle (Faulted ex)
+                        state.Worker.Status <- nullable(int WorkerStatus.Faulted)
+                        state.Worker.Fault <- Configuration.Pickler.Pickle<Exception>(ex)
                         let! c = Table.replace config table state.Worker
                         current <- Some c
                     with _ -> ()
                     return! loop (Some state)
                 | Some(Stop(ch)), Some state ->
                     try
-                        state.Worker.Status <- WorkerStatus.Pickle WorkerStatus.Stopped
+                        state.Worker.Status <- nullable(int WorkerStatus.Stopped)
+                        state.Worker.Fault <- null
                         let! c = Table.replace config table state.Worker
                         current <- Some c
                     with _ -> ()
@@ -359,7 +355,8 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                 let w = new WorkerRecord(pk, workerId, Dns.GetHostName(), nullable ps.Id, ps.ProcessName, joined)
                 w.UpdateCounters(perfMon.Value.GetCounters())
                 w.ActiveJobs <- nullable 0
-                w.Status <-  WorkerStatus.Pickle Initializing
+                w.Status <- nullable(int WorkerStatus.Initializing)
+                w.Fault <- null
                 w.Version <- ReleaseInfo.localVersion.ToString(4)
                 w.MaxJobs <- match maxJobs with None -> nullableDefault | Some mj -> nullable mj
                 w.ConfigurationId <- Configuration.Pickler.Pickle config
@@ -375,7 +372,7 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
 
     member this.SetWorkerStopped(worker : WorkerRecord) : Async<unit> =
         async {
-            worker.Status <- WorkerStatus.Pickle Stopped
+            worker.Status <- nullable(int WorkerStatus.Stopped)
             let! _ = Table.replace config table worker
             return ()
         }
@@ -396,11 +393,12 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
         // TODO : Make timespan part of the query?
         return ws |> Seq.filter (fun w -> DateTimeOffset.UtcNow - w.Timestamp < timespan)
                   |> Seq.filter (fun w ->
-                        match Configuration.Pickler.UnPickle<WorkerStatus> w.Status with
-                        | Running -> true
-                        | Initializing -> showStarting
-                        | Stopped -> showInactive
-                        | Faulted _ -> showFaulted )
+                        match enum<WorkerStatus> w.Status.Value with
+                        | WorkerStatus.Running -> true
+                        | WorkerStatus.Initializing -> showStarting
+                        | WorkerStatus.Stopped -> showInactive
+                        | WorkerStatus.Faulted -> showFaulted
+                        | s -> failwith "Invalid WorkerStatus %A" s)
     }
 
     member this.GetWorkerRefs(timespan : TimeSpan, showStarting : bool, showInactive : bool, showFaulted : bool) : Async<WorkerRef seq> =
@@ -420,7 +418,8 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
             let ps = Diagnostics.Process.GetCurrentProcess()
             let joined = DateTimeOffset.UtcNow
             let w = new WorkerRecord(pk, workerId, Dns.GetHostName(), nullable ps.Id, ps.ProcessName, joined)
-            w.Status <- WorkerStatus.Pickle (Faulted ex)
+            w.Status <- nullable(int WorkerStatus.Faulted)
+            w.Fault <- Configuration.Pickler.Pickle<Exception>(ex)
             w.ETag <- "*"
             do! Table.insertOrReplace config config.RuntimeTable w
                 |> Async.Ignore
