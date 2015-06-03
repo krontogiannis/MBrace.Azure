@@ -265,11 +265,9 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
                 job.CreationTime <- nullable DateTimeOffset.UtcNow
             | JobStatus.Active -> 
                 job.StartTime <- nullable DateTimeOffset.UtcNow
-            | JobStatus.Completed 
-//            | JobStatus.Cancelled 
-//            | JobStatus.Suspended ->
-//                job.CompletionTime <- nullable DateTimeOffset.UtcNow
-            | _ -> ()
+            | JobStatus.Completed ->
+                job.CompletionTime <- nullable DateTimeOffset.UtcNow
+            | _ -> failwithf "Invalid status %A" status
 
             deliveryCount |> Option.iter (fun dc -> job.DeliveryCount <- nullable dc)
             workerId |> Option.iter (fun wid -> job.WorkerId <- wid)

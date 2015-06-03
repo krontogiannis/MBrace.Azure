@@ -12,8 +12,10 @@ open System.Text
 open MBrace.Azure.Runtime.Utilities
 
 type internal JobReporter() = 
-    static let onNull (value : Nullable<'T>) = 
-        if value.HasValue then value.Value.ToString() else "N/A" 
+    static let optionToString (value : Option<'T>) = 
+        match value with 
+        | Some value -> value.ToString() 
+        | None -> "N/A" 
 
     static let template : Field<Job> list = 
         [ Field.create "Id" Left (fun p -> p.Id)
@@ -23,8 +25,8 @@ type internal JobReporter() =
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
           Field.create "Retries" Left (fun p -> p.DeliveryCount - 1)
           Field.create "Posted" Left (fun p -> p.CreationTime) 
-          Field.create "Started" Left (fun p -> onNull p.StartTime) 
-          Field.create "Completed" Left (fun p -> onNull p.CompletionTime) 
+          Field.create "Started" Left (fun p -> optionToString p.StartTime) 
+          Field.create "Completed" Left (fun p -> optionToString p.CompletionTime) 
           Field.create "Timestamp" Left (fun p -> p.Timestamp)
         ]
     

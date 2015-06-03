@@ -126,6 +126,11 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
     //member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
      
 and internal ProcessReporter() = 
+    static let optionToString (value : Option<'T>) = 
+        match value with 
+        | Some value -> value.ToString() 
+        | None -> "N/A" 
+
     static let template : Field<ProcessRecord * seq<Job>> list = 
         [ Field.create "Name" Left (fun (p,_) -> p.Name)
           Field.create "Process Id" Right (fun (p,_) -> p.Id)
@@ -137,8 +142,8 @@ and internal ProcessReporter() =
             let count s = jobs |> Seq.filter (fun j -> j.Status = s) |> Seq.length
             sprintf "%3d / %3d / %3d" (count JobStatus.Active) (count JobStatus.Completed) total)
           Field.create "Result Type" Left (fun (p,_) -> p.TypeName) 
-          Field.create "Start Time" Left (fun (p,_) -> p.InitializationTime)
-          Field.create "Completion Time" Left (fun (p,_) -> p.CompletionTime)
+          Field.create "Initialization time" Left (fun (p,_) -> p.InitializationTime.ToOption() |> optionToString)
+          Field.create "Completion time" Left (fun (p,_) -> p.CompletionTime.ToOption() |> optionToString)
         ]
 
     /// No need to have a Process obj (having dependencies downloaded, etc)    
