@@ -39,6 +39,7 @@ open MBrace.Core.Internals
 open MBrace.Runtime.Utils
 open MBrace.Azure.Runtime.Primitives
 open MBrace.Azure.Runtime.Info
+open MBrace.Azure.Runtime.Utilities
 open System
 
 /// Job kind.
@@ -72,8 +73,6 @@ type JobStatus =
     | Active    = 2
     | Inactive  = 3
     | Completed = 4
-    //| Cancelled = 5
-    //| Suspended = 6
 
 // Stored in table.
 type private JobKind =
@@ -174,34 +173,34 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     /// Job timestamp, used for active jobs.
     member this.Timestamp = job.Timestamp
     /// The number of times this job has been dequeued for execution.
-    member this.DeliveryCount = job.DeliveryCount.GetValueOrDefault(-1)
+    member this.DeliveryCount = job.DeliveryCount.Value
     /// The point in time this job was posted.
-    member this.CreationTime = job.CreationTime.GetValueOrDefault()
+    member this.CreationTime = job.CreationTime.Value
     /// The point in time this job was marked as Active.
-    member this.StartTime = job.StartTime
+    member this.StartTime = job.StartTime.ToOption()
     /// The point in time this job completed.
-    member this.CompletionTime = job.CompletionTime
+    member this.CompletionTime = job.CompletionTime.ToOption()
     /// Approximation of the job's serialized size in bytes.
     member this.JobSize = job.Size.GetValueOrDefault()
 
 
-    /// Try get job's partial result.
-    member this.TryGetResult<'T>() = Async.RunSync(this.TryGetResultAsync<'T>())
-
-    /// Try get job's partial result.
-    member this.TryGetResultAsync<'T>() = 
-        async {
-                match this.JobType with
-                | Root | Task | TaskAffined _ -> 
-                    let! result = ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
-                    match result with
-                    | Some r -> return Some r.Value
-                    | None -> return None
-                | Parallel(i,m) | ParallelAffined(_,i,m) ->
-                    return! ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
-                | Choice _ | ChoiceAffined _ ->
-                    return! Async.Raise(NotSupportedException("Partial result not supported for Choice."))
-        }
+//    /// Try get job's partial result.
+//    member this.TryGetResult<'T>() = Async.RunSync(this.TryGetResultAsync<'T>())
+//
+//    /// Try get job's partial result.
+//    member this.TryGetResultAsync<'T>() = 
+//        async {
+//                match this.JobType with
+//                | Root | Task | TaskAffined _ -> 
+//                    let! result = ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
+//                    match result with
+//                    | Some r -> return Some r.Value
+//                    | None -> return None
+//                | Parallel(i,m) | ParallelAffined(_,i,m) ->
+//                    return! ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
+//                | Choice _ | ChoiceAffined _ ->
+//                    return! Async.Raise(NotSupportedException("Partial result not supported for Choice."))
+//        }
         
 
 namespace MBrace.Azure.Runtime.Info
@@ -230,6 +229,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
         job.Size <- nullable size
         job.ResultPartition <- resPk
         job.ResultRow <- resRk
+        job.DeliveryCount <- nullable 0
         job
 
     member this.Create(pid, jobId, jobType : JobType, returnType, parentId, size : int64, resPk, resRk) =

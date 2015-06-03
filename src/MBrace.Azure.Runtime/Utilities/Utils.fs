@@ -6,6 +6,7 @@
     open System.Threading.Tasks
     open Microsoft.WindowsAzure.Storage.Table
 
+
     [<AutoOpen>]
     module Utils =
 
@@ -15,6 +16,9 @@
         let fromGuid(guid : Guid) = guid.ToString("N")
 
         let uri fmt = Printf.ksprintf (fun s -> new Uri(s)) fmt
+
+        type Nullable<'T when 'T : struct and 'T : (new : unit -> 'T) and 'T :> ValueType > with
+            member this.ToOption() = if this.HasValue then Some this.Value else None
 
         let inline nullable< 'T when 'T : struct and  'T : (new : unit -> 'T) and  'T :> ValueType > (value : 'T) = 
             new Nullable<'T>(value)
