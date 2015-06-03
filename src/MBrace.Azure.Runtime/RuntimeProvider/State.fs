@@ -90,7 +90,6 @@ with
     member internal this.EnqueueJobBatch(psInfo : ProcessInfo, dependencies, cts, fp, scFactory, ec, cc, wfs : (#Cloud<'T> * IWorkerRef option) [], distribType : DistributionType, parentJobId, resultCell, aggregatorPk, aggregatorRk) : Async<unit> =
         async {
             let jobs = Array.zeroCreate wfs.Length
-            let pid = psInfo.Id
             for i = 0 to wfs.Length - 1 do
                 let jobId = guid()
                 let wf = fst wfs.[i]
@@ -130,12 +129,10 @@ with
             do! this.JobQueue.EnqueueBatch<PickledJob>(jobs, pid = psInfo.Id)
             let ids = jobs |> Seq.map (fun (j,_) -> j.JobId)
             do! this.JobManager.UpdateBatch(psInfo.Id, ids, JobStatus.Posted)
-            //do! this.ProcessManager.IncreaseTotalJobs(psInfo.Id, jobs.Length)
         }
 
     member private this.EnqueueJob(psInfo : ProcessInfo, jobId, dependencies, cts, fp, sc, ec, cc, wf : Cloud<'T>, jobType : JobType, parentJobId, resultCell) : Async<unit> =
         async {
-            let pid = psInfo.Id
             let startJob ctx =
                 let cont = { Success = sc; Exception = ec; Cancellation = cc }
                 Cloud.StartWithContinuations(wf, cont, ctx)
@@ -167,7 +164,6 @@ with
             this.Logger.Logf "Job Enqueue completed. Setting Job as posted."
             do! this.JobManager.Update(psInfo.Id, jobId, JobStatus.Posted)
             this.Logger.Logf "Job %s posted." jobId
-            //do! this.ProcessManager.IncreaseTotalJobs(pid)
         }
 
     /// Schedules a cloud workflow as an ICloudTask.

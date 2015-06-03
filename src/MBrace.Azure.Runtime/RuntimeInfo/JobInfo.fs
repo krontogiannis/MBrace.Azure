@@ -152,7 +152,7 @@ module private Helpers =
         jobRecord.Status <- nullable(int status)
         
 /// Represents a unit of work that can be executed by the distributed runtime.
-type Job internal (config : ConfigurationId, job : JobRecord) =
+type Job internal (job : JobRecord) =
     let jobType = parseJobType job
     let status = parseJobStatus job
 
@@ -279,7 +279,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
     member this.List(pid : string) =
         async {
             let! jobs = Table.queryPK<JobRecord> config config.RuntimeTable (mkPartitionKey pid)
-            return jobs |> Seq.map (fun job -> new Job(config, job))
+            return jobs |> Seq.map (fun job -> new Job(job))
         }
 
     member this.Heartbeat(pid, jobId) =
@@ -300,7 +300,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
         async {
             let! job = Table.read<JobRecord> config config.RuntimeTable (mkPartitionKey pid) jobId
             if job <> null then
-                return new Job(config, job)
+                return new Job(job)
             else
                 return failwithf "Job %A not found" jobId
         }

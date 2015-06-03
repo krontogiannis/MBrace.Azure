@@ -39,7 +39,6 @@ let Parallel (state : RuntimeState) (parentJob : JobItem) dependencies (computat
             
             let pid = parentJob.ProcessInfo.Id
             let parentId = parentJob.JobId
-            let workerId = state.WorkerManager.Current.Id
             let! childCts = state.ResourceFactory.RequestCancellationTokenSource(pid, parent = currentCts, metadata = parentId, elevate = true)
             
             let requestBatch = state.ResourceFactory.GetResourceBatchForProcess(pid)
@@ -99,10 +98,6 @@ let Choice (state : RuntimeState) (parentJob : JobItem) dependencies (computatio
 
         | Choice1Of2 computations ->
             // request runtime resources required for distribution coordination
-            let pid = parentJob.ProcessInfo.Id
-            let parentId = parentJob.JobId
-            let workerId = state.WorkerManager.Current.Id
-            
             let n = computations.Length // avoid capturing computation array in cont closures
             let currentCts = ctx.CancellationToken :?> DistributedCancellationTokenSource
             let! childCts = state.ResourceFactory.RequestCancellationTokenSource(parentJob.JobId, parent = currentCts, metadata = parentJob.JobId, elevate = true)
