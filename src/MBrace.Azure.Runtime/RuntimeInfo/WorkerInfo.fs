@@ -283,7 +283,7 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                         state.Worker.ActiveJobs <- nullable jc
                         let! c = Table.replace config table state.Worker
                         current <- Some c
-                    with _ -> ()
+                    with ex -> logger.Logf "Heartbeat Loop Table update error: %A" ex
                     return! loop (Some state)
                 | Some(SetRunning(ch)), Some state ->
                     try
@@ -291,7 +291,7 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                         state.Worker.Fault <- null
                         let! c = Table.replace config table state.Worker
                         current <- Some c
-                    with _ -> ()
+                    with ex -> logger.Logf "Heartbeat Loop Table update error: %A" ex
                     ch.Reply()
                     return! loop (Some {state with LastHeartBeatFault = false })
                 | Some(SetFaulted(ex)), Some state ->
@@ -300,7 +300,7 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                         state.Worker.Fault <- Configuration.Pickler.Pickle<Exception>(ex)
                         let! c = Table.replace config table state.Worker
                         current <- Some c
-                    with _ -> ()
+                    with ex -> logger.Logf "Heartbeat Loop Table update error: %A" ex
                     return! loop (Some state)
                 | Some(Stop(ch)), Some state ->
                     try
@@ -308,7 +308,7 @@ type WorkerManager private (config : ConfigurationId, logger : ICloudLogger) =
                         state.Worker.Fault <- null
                         let! c = Table.replace config table state.Worker
                         current <- Some c
-                    with _ -> ()
+                    with ex -> logger.Logf "Heartbeat Loop Table update error: %A" ex
                     ch.Reply()
                     return! loop None
                 | other ->
