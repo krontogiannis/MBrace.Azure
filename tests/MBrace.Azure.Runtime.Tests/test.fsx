@@ -20,13 +20,13 @@ let selectEnv name =
     (Environment.GetEnvironmentVariable(name,EnvironmentVariableTarget.User),
       Environment.GetEnvironmentVariable(name,EnvironmentVariableTarget.Machine),
         Environment.GetEnvironmentVariable(name,EnvironmentVariableTarget.Process))
-    |> function 
+    |> function
        | s, _, _ when not <| String.IsNullOrEmpty(s) -> s
        | _, s, _ when not <| String.IsNullOrEmpty(s) -> s
        | _, _, s when not <| String.IsNullOrEmpty(s) -> s
        | _ -> failwith "Variable not found"
 
-let config = 
+let config =
     { Configuration.Default with
         StorageConnectionString = selectEnv "azurestorageconn"
         ServiceBusConnectionString = selectEnv "azureservicebusconn" }
@@ -48,44 +48,60 @@ runtime.ShowProcesses()
 runtime.ShowWorkers()
 
 
+#r "Microsoft.WindowsAzure.Storage"
 open System
 open System.Collections.Generic
+open MBrace.Azure.Runtime.Info
 
-type Factory<'T> = Async<seq<string * 'T>>
+type private Factory = string -> Async<seq<JobRecord>>
 
-type RecordCache<'T> () =
-    let records = new Dictionary<string, 'T>()
-    let factories = new Dictionary<string, Factory<'T>>()
+[<AutoSerializable(false); Sealed; AbstractClass>]
+type JobCache private () =
+    let cache = new Dictionary<string, JobRecord>()
+    let factories = new Dictionary<string, Factory>()
 
-    let updateLoop =
-        let rec loop () = async {
-            ()
+    do Async.Start(
+        let interval = 500
+        let rec update() = async {
+            let! records = factories
+                           |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
+                           |> Async.Parallel
+                           |> Async.Catch
+            match records with
+            | Choice1Of2 records ->
+                records |> Seq.collect id |> Seq.iter (fun r -> cache.Add(r.Id, r))
+            | Choice2Of2 _ ->
+                ()
+            do! Async.Sleep(interval)
+            return! update ()
         }
+        update())
 
+    member __.AddJobFactory(pid : string, factory : Factory) =
+        factories.Add(pid, factory)
 
-    member this.AddFactory(key : string, factory : Factory<'T>) =
-        factories.Add(key, factory)
-
-
-
-
-
-
-
-
+    member __.TryGetRecord(jobId : string) =
+        match cache.TryGetValue(jobId) with
+        | true, v -> Some v
+        | false, _ -> None
 
 
 
-let ps = 
+
+
+
+
+
+let ps =
     [1..5]
-    |> Seq.map (fun i -> 
-        [1..i] 
+    |> Seq.map (fun i ->
+        [1..i]
         |> Seq.map (fun j -> cloud { return i ,j })
         |> Cloud.Parallel
         |> Cloud.Ignore)
     |> Cloud.Parallel
     |> Cloud.Ignore
-    |> runtime.CreateProcess 
+    |> runtime.CreateProcess
 
 ps.AwaitResult()
 //ps.ShowJobsTree()
@@ -94,7 +110,7 @@ ps.ShowJobs()
 runtime.ShowProcesses()
 
 ps.GetJobs()
-|> Seq.map (fun j -> 
+|> Seq.map (fun j ->
     try
         Some(box <| j.TryGetResult<int * int>())
     with _ ->
@@ -105,7 +121,7 @@ ps.GetJobs()
 |> Seq.toArray
 
 
-let ps = 
+let ps =
     cloud {
         printfn "1"
         do! [1..2] |> Seq.map (fun _ -> cloud { return! Cloud.Sleep 10000 })
@@ -136,8 +152,8 @@ let cr = runtime.Run <| CloudValue.New(42)
 
 runtime.Run <| cr.Value
 
-let wf = [1..20] 
-         |> List.map (fun i -> cloud { return i }) 
+let wf = [1..20]
+         |> List.map (fun i -> cloud { return i })
          |> Cloud.Parallel
          |> runtime.CreateProcess
 
@@ -177,7 +193,7 @@ ps.AwaitResult()
 
 
 
-let wf = 
+let wf =
     cloud {
         let! ct = Cloud.CreateCancellationTokenSource()
         let! t = Cloud.StartAsCloudTask(cloud { return 42 }, cancellationToken = ct.Token)
@@ -189,18 +205,18 @@ ps.AwaitResult()
 ps.ShowInfo()
 
 
-let ps () = 
+let ps () =
  cloud { let tasks = new ResizeArray<_>()
-         for i in [ 0 .. 200 ] do 
+         for i in [ 0 .. 200 ] do
              let! x = Cloud.StartAsCloudTask (cloud { do! Cloud.Sleep 1000
                                                       return 1 })
              tasks.Add x
-         for t in tasks.ToArray() do 
+         for t in tasks.ToArray() do
              let! res = t.AwaitResult()
              ()
         }
 
-let job = 
+let job =
    cloud { return! ps() }
      |> runtime.CreateProcess
 
@@ -224,7 +240,7 @@ ctask.Result
 ctask.Id
 
 
-let x = 
+let x =
     cloud {
         let! ctask = Cloud.StartAsCloudTask(cloud { return 42 })
         return! ctask.AwaitResult()
@@ -238,7 +254,7 @@ let wf = cloud {
                 do! CloudChannel.Send(sp, i)
                 printfn "send %d" i
             return ()
-        } 
+        }
         <||>
         cloud {
             let i = ref 0
@@ -254,7 +270,7 @@ runtime.Run wf
 
 let wf = cloud {
     let! atom = CloudAtom.New(42)
-    do! [1..10] 
+    do! [1..10]
         |> Seq.map (fun _ -> CloudAtom.Update(atom, fun x -> x + 1))
         |> Cloud.Parallel
         |> Cloud.Ignore
@@ -269,7 +285,7 @@ module FaultPolicyExtensions =
     type FaultPolicyBuilder (fp : FaultPolicy) =
         inherit CloudBuilder()
 
-        member __.Run(wf : Cloud<'T>) = 
+        member __.Run(wf : Cloud<'T>) =
             cloud {
                 let! handle = wf
                               |> Cloud.StartChild
@@ -282,9 +298,9 @@ module FaultPolicyExtensions =
     let infinite = new FaultPolicyBuilder(FaultPolicy.InfiniteRetry()) //:> CloudBuilder
 
 let wf = cloud {
-    let! x = infinite { 
+    let! x = infinite {
                 printfn "infinite"
-                do! Cloud.Sleep 10000 
+                do! Cloud.Sleep 10000
                 return 42
             }
     let! z = retry 3 {
@@ -292,10 +308,10 @@ let wf = cloud {
                 do! Cloud.Sleep 10000
                 return 44
             }
-    let! y = exactlyOnce { 
+    let! y = exactlyOnce {
                 printfn "exactlyOnce"
                 do! Cloud.Sleep 10000
-                return 43 
+                return 43
             }
     return x, z, y
 }
@@ -323,70 +339,71 @@ cr.ToEnumerable() |> runtime.RunLocal
 
 runtime.StoreClient.CloudCell.Read(c)
 
-
-
-
-cloud { 
-    return! cloud { return 1 } <||> cloud { return 2 }
-}
-|> runtime.RunLocal
-
-
-let c = ref 0
-for i in 1 .. 10 do
-    c := runtime.Run(cloud { return !c + 1 })
-
-
-let x = cloud { return 42 }
-
-
-runtime.Run x
-
-open System.IO
-
-System.IO.Directory.CreateDirectory( __SOURCE_DIRECTORY__ + "/script-packages")
-System.Environment.CurrentDirectory <- __SOURCE_DIRECTORY__ + "/script-packages"
-
-if not (File.Exists "paket.exe") then
-    let url = "https://github.com/fsprojects/Paket/releases/download/0.27.2/paket.exe" in use wc = new System.Net.WebClient() in let tmp = Path.GetTempFileName() in wc.DownloadFile(url, tmp); File.Move(tmp,"paket.exe");;
-
-//------------------------------------------
-// Step 1. Resolve and install the Math.NET Numerics packages. You 
-// can add any additional packages you like to this step.
-
-#r "script-packages/paket.exe"
-
-Paket.Dependencies.Install """
-    source https://nuget.org/api/v2
-    nuget MathNet.Numerics
-    nuget MathNet.Numerics.FSharp
-    nuget MathNet.Numerics.MKL.Win-x64
-""";;
-
-
-//------------------------------------------
-// Step 2. Reference and use the packages on the local machine
-
-#load @"script-packages/packages/MathNet.Numerics.FSharp/MathNet.Numerics.fsx"
-
-open MathNet.Numerics
-open MathNet.Numerics.LinearAlgebra
-
-// To upload DLLs, we simply read the local 64-bit version of the DLL
-
-let contentDir = __SOURCE_DIRECTORY__ + @"/script-packages/packages/MathNet.Numerics.MKL.Win-x64/content/"
-Runtime.RegisterNativeDependency <| contentDir + "libiomp5md.dll"
-Runtime.RegisterNativeDependency <| contentDir + "MathNet.Numerics.MKL.dll"
-Runtime.NativeDependencies
-
-let UseNative() = Control.UseNativeMKL()
-
-// This can take a while first time you run it, because 'bytes2' is 41MB and needs to be uploaded
-let firstMklJob = 
-   cloud { UseNative()
-           let m = Matrix<double>.Build.Random(200,200) 
-           return m.LU().Determinant }
-    |> runtime.CreateProcess
-
-firstMklJob.ShowInfo()
-firstMklJob.AwaitResult()
+//
+//
+//
+//cloud {
+//    return! cloud { return 1 } <||> cloud { return 2 }
+//}
+//|> runtime.RunLocal
+//
+//
+//let c = ref 0
+//for i in 1 .. 10 do
+//    c := runtime.Run(cloud { return !c + 1 })
+//
+//
+//let x = cloud { return 42 }
+//
+//
+//runtime.Run x
+//
+//open System.IO
+//
+//System.IO.Directory.CreateDirectory( __SOURCE_DIRECTORY__ + "/script-packages")
+//System.Environment.CurrentDirectory <- __SOURCE_DIRECTORY__ + "/script-packages"
+//
+//if not (File.Exists "paket.exe") then
+//    let url = "https://github.com/fsprojects/Paket/releases/download/0.27.2/paket.exe" in use wc = new System.Net.WebClient() in let tmp = Path.GetTempFileName() in wc.DownloadFile(url, tmp); File.Move(tmp,"paket.exe");;
+//
+////------------------------------------------
+//// Step 1. Resolve and install the Math.NET Numerics packages. You
+//// can add any additional packages you like to this step.
+//
+//#r "script-packages/paket.exe"
+//
+//Paket.Dependencies.Install """
+//    source https://nuget.org/api/v2
+//    nuget MathNet.Numerics
+//    nuget MathNet.Numerics.FSharp
+//    nuget MathNet.Numerics.MKL.Win-x64
+//""";;
+//
+//
+////------------------------------------------
+//// Step 2. Reference and use the packages on the local machine
+//
+//#load @"script-packages/packages/MathNet.Numerics.FSharp/MathNet.Numerics.fsx"
+//
+//open MathNet.Numerics
+//open MathNet.Numerics.LinearAlgebra
+//
+//// To upload DLLs, we simply read the local 64-bit version of the DLL
+//
+//let contentDir = __SOURCE_DIRECTORY__ + @"/script-packages/packages/MathNet.Numerics.MKL.Win-x64/content/"
+//Runtime.RegisterNativeDependency <| contentDir + "libiomp5md.dll"
+//Runtime.RegisterNativeDependency <| contentDir + "MathNet.Numerics.MKL.dll"
+//Runtime.NativeDependencies
+//
+//let UseNative() = Control.UseNativeMKL()
+//
+//// This can take a while first time you run it, because 'bytes2' is 41MB and needs to be uploaded
+//let firstMklJob =
+//   cloud { UseNative()
+//           let m = Matrix<double>.Build.Random(200,200)
+//           return m.LU().Determinant }
+//    |> runtime.CreateProcess
+//
+//firstMklJob.ShowInfo()
+//firstMklJob.AwaitResult()
+//
