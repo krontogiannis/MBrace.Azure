@@ -20,14 +20,15 @@ open Microsoft.FSharp.Linq
 
 [<AutoSerializable(false); AbstractClass>]
 /// Represents a cloud process.
-type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, jman : JobManager) = 
+type Process internal (config, pid : string, ty : Type, processManager : ProcessManager, jobManager : JobManager) = 
     
     let proc = 
-        new Live<_>((fun () -> pmon.GetProcess(pid)), initial = Choice2Of2(exn ("Process not initialized")), 
+        new Live<_>((fun () -> processManager.GetProcess(pid)), initial = Choice2Of2(exn ("Process not initialized")), 
                     keepLast = true, interval = 500)
 
-    let jobs =
-        new Live<_>((fun () -> jman.List(pid)), initial = Choice2Of2(exn ("Process not initialized")), keepLast = true, interval = 500)
+    let getJobs =
+        jobManager.AddToCache(pid)
+        fun () -> jobManager.GetCached(pid)
 
     let logger = new ProcessLogger(config, pid)
     let dcts = lazy DistributedCancellationTokenSource.FromPath(config, proc.Value.CancellationPartitionKey, proc.Value.CancellationRowKey)
@@ -83,15 +84,15 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
 
     /// Returns the number of tasks created by this process and are currently executing.
     member this.ActiveJobs : int = 
-        jobs.Value |> Seq.filter (fun j -> j.Status = JobStatus.Active) |> Seq.length
+        getJobs() |> Seq.filter (fun j -> j.Status = JobStatus.Active) |> Seq.length
 
     /// Returns the number of tasks created by this process.
     member this.TotalJobs : int =
-        jobs.Value |> Seq.length
+        getJobs() |> Seq.length
 
     /// Returns the number of tasks completed by this process.
     member this.CompletedJobs : int =
-        jobs.Value |> Seq.filter (fun j -> j.Status = JobStatus.Completed) |> Seq.length
+        getJobs() |> Seq.filter (fun j -> j.Status = JobStatus.Completed) |> Seq.length
 
     /// Returns the number of tasks failed to execute by this process.
     //member this.FaultedJobs : int = proc.Value.FaultedJobs.Value
@@ -100,7 +101,7 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
     member this.Kill() = Async.RunSync(this.KillAsync())
     /// Asynchronously sends a kill signal for this process.
     member this.KillAsync() = async {
-            do! pmon.SetCancellationRequested(pid)
+            do! processManager.SetCancellationRequested(pid)
             do this.DistributedCancellationTokenSource.Cancel()
         }
 
@@ -118,13 +119,10 @@ type Process internal (config, pid : string, ty : Type, pmon : ProcessManager, j
     /// Prints a detailed report for this process.
     member this.ShowInfo () = printf "%s" <| ProcessReporter.Report([this], "Process", false)
 
-    member this.GetJobs() = jobs.Value //Async.RunSync(this.GetJobsAsync())
+    member this.GetJobs() = getJobs() //Async.RunSync(this.GetJobsAsync())
 
     member this.ShowJobs() = printfn "%s" <| JobReporter.Report(this.GetJobs(), sprintf "Jobs for process %A" pid)
 
-    //member this.GetJobsAsync() = jobs.Value //jman.List(pid)
-    //member this.ShowJobsTree () = printfn "%s" <| JobReporter.ReportTreeView(this.GetJobs(), sprintf "Jobs for process %s" pid)
-     
 and internal ProcessReporter() = 
     static let optionToString (value : Option<'T>) = 
         match value with 

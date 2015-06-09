@@ -431,7 +431,7 @@ type Runtime private (clientId, config : Configuration) =
     member this.ShowProcess(pid) =
         async {
             let! ps = pmon.GetProcess(pid)
-            let! jobs = state.JobManager.List(ps.Id)
+            let! jobs = state.JobManager.Fetch(ps.Id)
             Console.WriteLine(ProcessReporter.Report([ps, jobs], "Process", false))
         }
 
@@ -441,7 +441,7 @@ type Runtime private (clientId, config : Configuration) =
             let! ps = pmon.GetProcesses()
             let! jobs = 
                 ps 
-                |> Array.map (fun p -> state.JobManager.List(p.Id))
+                |> Array.map (fun p -> state.JobManager.Fetch(p.Id))
                 |> Async.Parallel
             Console.WriteLine(ProcessReporter.Report(Seq.zip ps jobs, "Processes", false))
         } |> Async.RunSync

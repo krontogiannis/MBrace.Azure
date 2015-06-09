@@ -196,6 +196,71 @@ open MBrace.Core.Internals
 open MBrace.Azure.Runtime.Utilities
 open Microsoft.WindowsAzure.Storage.Table
 open MBrace.Azure.Runtime.Primitives
+open System.Collections.Generic
+
+type private JobId = string
+type private ProcessId = string
+type private Factory = ProcessId -> Async<JobRecord []>
+
+[<AutoSerializable(false); Sealed; AbstractClass>]
+type private JobCache private () =
+    static let cache = new Dictionary<ProcessId, Dictionary<JobId, JobRecord>>()
+    static let factories = new Dictionary<ProcessId, Factory>()
+    static let timestamps = new Dictionary<ProcessId, DateTime>()
+    static let factoryFilter =
+        let factoryInterval = TimeSpan.FromMinutes(2.)
+        fun pid -> DateTime.Now - timestamps.[pid] <= factoryInterval
+
+    static do 
+        Async.Start(
+            let interval = 500
+            let rec update() = async {
+                let! records = factories
+                               |> Seq.filter(fun kvp -> factoryFilter kvp.Key)
+                               |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
+                               |> Async.Parallel
+                               |> Async.Catch
+
+                match records with
+                | Choice1Of2 records ->
+                    records 
+                    |> Seq.collect id 
+                    |> Seq.iter (fun r -> 
+                        match cache.TryGetValue(r.ProcessId) with
+                        | true, c -> c.[r.Id] <- r
+                        | false, _ -> 
+                            let c = new Dictionary<JobId, JobRecord>()
+                            c.[r.Id] <- r
+                            cache.Add(r.ProcessId, c))
+                | Choice2Of2 _ ->
+                    ()
+                do! Async.Sleep(interval)
+                return! update ()
+            }
+            update())
+
+    static member AddJobFactory(pid : string, factory : Factory) : unit =
+        factories.[pid] <- factory
+
+    static member GetRecords(pid : string) : JobRecord [] =
+        let records =
+            if factoryFilter pid then
+                cache.[pid] |> Seq.map (fun kvp -> kvp.Value) |> Seq.toArray
+            else
+                Async.RunSync(factories.[pid](pid))
+        timestamps.[pid] <- DateTime.Now
+        records
+
+    static member GetRecord(pid : string, jobId : string) : JobRecord =
+        let record =
+            if factoryFilter pid then
+                cache.[pid].[jobId]
+            else
+                let jobs = Async.RunSync(factories.[pid](pid))
+                jobs |> Seq.iter (fun j -> cache.[pid].[j.Id] <- j)
+                jobs |> Seq.find (fun r -> r.Id = jobId)
+        timestamps.[pid] <- DateTime.Now
+        record
 
 
 [<AutoSerializableAttribute(false)>]
@@ -216,6 +281,9 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
         job.ResultRow <- resRk
         job.DeliveryCount <- nullable 0
         job
+
+    let fetchAll pid =
+        Table.queryPK<JobRecord> config config.RuntimeTable (mkPartitionKey pid)
 
     member this.Create(pid, jobId, jobType : JobType, returnType, parentId, size : int64, resPk, resRk) =
         async {
@@ -261,9 +329,9 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             return ()
         }
 
-    member this.List(pid : string) =
+    member this.Fetch(pid : string) =
         async {
-            let! jobs = Table.queryPK<JobRecord> config config.RuntimeTable (mkPartitionKey pid)
+            let! jobs = fetchAll pid
             return jobs |> Seq.map (fun job -> new Job(config, job))
         }
 
@@ -281,7 +349,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             logger.Logf "Stopped heartbeat loop for Job %s" jobId
         } |> Async.StartChild
 
-    member this.Get(pid : string, jobId : string) =
+    member this.Fetch(pid : string, jobId : string) =
         async {
             let! job = Table.read<JobRecord> config config.RuntimeTable (mkPartitionKey pid) jobId
             if job <> null then
@@ -289,6 +357,16 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             else
                 return failwithf "Job %A not found" jobId
         }
+
+    member this.AddToCache(pid) =
+        JobCache.AddJobFactory(pid, fun pid -> fetchAll pid)
+
+    member this.GetCached(pid : string) =
+        JobCache.GetRecords(pid)
+        |> Seq.map (fun r -> new Job(config, r))
+
+    member this.GetCached(pid : string, jobId : string) =
+        new Job(config, JobCache.GetRecord(pid, jobId))
 
     static member Create (config : ConfigurationId, logger) = new JobManager(config, logger)
 
