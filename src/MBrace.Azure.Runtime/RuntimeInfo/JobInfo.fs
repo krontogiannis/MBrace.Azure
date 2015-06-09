@@ -1,12 +1,11 @@
 ﻿namespace MBrace.Azure.Runtime.Info
 
 open MBrace.Core.Internals
-
 open MBrace.Azure
-
 open System
 open Microsoft.WindowsAzure.Storage.Table
 open MBrace.Azure.Runtime.Utilities
+open System.Collections.Generic
 
 [<AllowNullLiteral>]
 type JobRecord (processId, jobId) =
@@ -32,6 +31,71 @@ type JobRecord (processId, jobId) =
     member val CompletionTime = Nullable<DateTimeOffset>() with get, set
 
     new () = JobRecord(null, null)
+
+
+type private JobId = string
+type private ProcessId = string
+type private Factory = ProcessId -> Async<JobRecord []>
+
+[<AutoSerializable(false); Sealed; AbstractClass>]
+type JobCache private () =
+    static let cache = new Dictionary<ProcessId, Dictionary<JobId, JobRecord>>()
+    static let factories = new Dictionary<ProcessId, Factory>()
+    static let timestamps = new Dictionary<ProcessId, DateTime>()
+    static let factoryFilter =
+        let factoryInterval = TimeSpan.FromMinutes(2.)
+        fun pid -> DateTime.Now - timestamps.[pid] <= factoryInterval
+
+    static do 
+        Async.Start(
+            let interval = 500
+            let rec update() = async {
+                let! records = factories
+                               |> Seq.filter(fun kvp -> factoryFilter kvp.Key)
+                               |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
+                               |> Async.Parallel
+                               |> Async.Catch
+
+                match records with
+                | Choice1Of2 records ->
+                    records 
+                    |> Seq.collect id 
+                    |> Seq.iter (fun r -> 
+                        match cache.TryGetValue(r.ProcessId) with
+                        | true, c -> c.[r.Id] <- r
+                        | false, _ -> 
+                            let c = new Dictionary<JobId, JobRecord>()
+                            c.[r.Id] <- r
+                            cache.Add(r.ProcessId, c))
+                | Choice2Of2 _ ->
+                    ()
+                do! Async.Sleep(interval)
+                return! update ()
+            }
+            update())
+
+    static member AddJobFactory(pid : string, factory : Factory) : unit =
+        factories.[pid] <- factory
+
+    static member GetRecords(pid : string) : JobRecord [] =
+        let records =
+            if factoryFilter pid then
+                cache.[pid] |> Seq.map (fun kvp -> kvp.Value) |> Seq.toArray
+            else
+                Async.RunSync(factories.[pid](pid))
+        timestamps.[pid] <- DateTime.Now
+        records
+
+    static member GetRecord(pid : string, jobId : string) : JobRecord =
+        let record =
+            if factoryFilter pid then
+                cache.[pid].[jobId]
+            else
+                let jobs = Async.RunSync(factories.[pid](pid))
+                jobs |> Seq.iter (fun j -> cache.[pid].[j.Id] <- j)
+                jobs |> Seq.find (fun r -> r.Id = jobId)
+        timestamps.[pid] <- DateTime.Now
+        record
 
 namespace MBrace.Azure
 
@@ -153,39 +217,44 @@ module private Helpers =
         
 /// Represents a unit of work that can be executed by the distributed runtime.
 type Job internal (config : ConfigurationId, job : JobRecord) =
-    let jobType = parseJobType job
-    let status = parseJobStatus job
+    let getJob () =
+        Runtime.Info.JobCache.GetRecord(job.ProcessId, job.Id)
 
     /// Job unique identifier.
-    member this.Id = job.Id
+    member this.Id = getJob().Id
     /// Job's PID.
-    member this.ProcessId = job.ProcessId
+    member this.ProcessId = getJob().ProcessId
     /// Parent job identifier.
-    member this.ParentId = job.ParentId
+    member this.ParentId = getJob().ParentId
     /// Type of this job.
-    member this.JobType = jobType
+    member this.JobType = parseJobType <| getJob()
     /// Job status.
-    member this.Status = status
+    member this.Status = parseJobStatus <| getJob()
     /// Worker executing this job.
-    member this.WorkerId = job.WorkerId
+    member this.WorkerId = getJob().WorkerId
     /// Job return type.
-    member this.ReturnType = job.ReturnType
+    member this.ReturnType = getJob().ReturnType
     /// Job timestamp, used for active jobs.
-    member this.Timestamp = job.Timestamp
+    member this.Timestamp = getJob().Timestamp
     /// The number of times this job has been dequeued for execution.
-    member this.DeliveryCount = job.DeliveryCount.Value
+    member this.DeliveryCount = getJob().DeliveryCount.Value
     /// The point in time this job was posted.
-    member this.CreationTime = job.CreationTime.Value
+    member this.CreationTime = getJob().CreationTime.Value
     /// The point in time this job was marked as Active.
-    member this.StartTime = job.StartTime.ToOption()
+    member this.StartTime = getJob().StartTime.ToOption()
     /// The point in time this job completed.
-    member this.CompletionTime = job.CompletionTime.ToOption()
+    member this.CompletionTime = getJob().CompletionTime.ToOption()
     /// Approximation of the job's serialized size in bytes.
-    member this.JobSize = job.Size.GetValueOrDefault()
+    member this.JobSize = getJob().Size.GetValueOrDefault()
 
-    member internal this.ResultPartition = job.ResultPartition
-    member internal this.ResultRow = job.ResultRow
+    member internal this.ResultPartition = getJob().ResultPartition
+    member internal this.ResultRow = getJob().ResultRow
     member internal this.ConfigurationId = config
+
+    override this.Equals(obj : obj) =
+        match obj with
+        | :? Job as j -> this.Id = j.Id
+        | _ -> false
 
 namespace MBrace.Azure.Runtime.Info
 
@@ -196,71 +265,6 @@ open MBrace.Core.Internals
 open MBrace.Azure.Runtime.Utilities
 open Microsoft.WindowsAzure.Storage.Table
 open MBrace.Azure.Runtime.Primitives
-open System.Collections.Generic
-
-type private JobId = string
-type private ProcessId = string
-type private Factory = ProcessId -> Async<JobRecord []>
-
-[<AutoSerializable(false); Sealed; AbstractClass>]
-type private JobCache private () =
-    static let cache = new Dictionary<ProcessId, Dictionary<JobId, JobRecord>>()
-    static let factories = new Dictionary<ProcessId, Factory>()
-    static let timestamps = new Dictionary<ProcessId, DateTime>()
-    static let factoryFilter =
-        let factoryInterval = TimeSpan.FromMinutes(2.)
-        fun pid -> DateTime.Now - timestamps.[pid] <= factoryInterval
-
-    static do 
-        Async.Start(
-            let interval = 500
-            let rec update() = async {
-                let! records = factories
-                               |> Seq.filter(fun kvp -> factoryFilter kvp.Key)
-                               |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
-                               |> Async.Parallel
-                               |> Async.Catch
-
-                match records with
-                | Choice1Of2 records ->
-                    records 
-                    |> Seq.collect id 
-                    |> Seq.iter (fun r -> 
-                        match cache.TryGetValue(r.ProcessId) with
-                        | true, c -> c.[r.Id] <- r
-                        | false, _ -> 
-                            let c = new Dictionary<JobId, JobRecord>()
-                            c.[r.Id] <- r
-                            cache.Add(r.ProcessId, c))
-                | Choice2Of2 _ ->
-                    ()
-                do! Async.Sleep(interval)
-                return! update ()
-            }
-            update())
-
-    static member AddJobFactory(pid : string, factory : Factory) : unit =
-        factories.[pid] <- factory
-
-    static member GetRecords(pid : string) : JobRecord [] =
-        let records =
-            if factoryFilter pid then
-                cache.[pid] |> Seq.map (fun kvp -> kvp.Value) |> Seq.toArray
-            else
-                Async.RunSync(factories.[pid](pid))
-        timestamps.[pid] <- DateTime.Now
-        records
-
-    static member GetRecord(pid : string, jobId : string) : JobRecord =
-        let record =
-            if factoryFilter pid then
-                cache.[pid].[jobId]
-            else
-                let jobs = Async.RunSync(factories.[pid](pid))
-                jobs |> Seq.iter (fun j -> cache.[pid].[j.Id] <- j)
-                jobs |> Seq.find (fun r -> r.Id = jobId)
-        timestamps.[pid] <- DateTime.Now
-        record
 
 
 [<AutoSerializableAttribute(false)>]
