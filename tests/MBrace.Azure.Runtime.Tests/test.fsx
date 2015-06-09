@@ -53,37 +53,51 @@ open System
 open System.Collections.Generic
 open MBrace.Azure.Runtime.Info
 
-type private Factory = string -> Async<seq<JobRecord>>
+type private JobId = string
+type private ProcessId = string
+type private Factory = ProcessId -> Async<seq<JobRecord>>
 
 [<AutoSerializable(false); Sealed; AbstractClass>]
 type JobCache private () =
-    let cache = new Dictionary<string, JobRecord>()
-    let factories = new Dictionary<string, Factory>()
+    static let cache = new Dictionary<ProcessId, Dictionary<JobId, JobRecord>>()
+    static let factories = new Dictionary<ProcessId, Factory>()
+    static let timestamps = new Dictionary<ProcessId, DateTime>()
+    static let factoryInterval = TimeSpan.FromMinutes(2.)
 
-    do Async.Start(
-        let interval = 500
-        let rec update() = async {
-            let! records = factories
-                           |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
-                           |> Async.Parallel
-                           |> Async.Catch
-            match records with
-            | Choice1Of2 records ->
-                records |> Seq.collect id |> Seq.iter (fun r -> cache.Add(r.Id, r))
-            | Choice2Of2 _ ->
-                ()
-            do! Async.Sleep(interval)
-            return! update ()
-        }
-        update())
+    static do 
+        Async.Start(
+            let interval = 500
+            let rec update() = async {
+                let! records = factories
+                               |> Seq.filter(fun kvp -> DateTime.Now - timestamps.[kvp.Key] <= factoryInterval)
+                               |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
+                               |> Async.Parallel
+                               |> Async.Catch
 
-    member __.AddJobFactory(pid : string, factory : Factory) =
-        factories.Add(pid, factory)
+                match records with
+                | Choice1Of2 records ->
+                    records 
+                    |> Seq.collect id 
+                    |> Seq.iter (fun r -> 
+                        match cache.TryGetValue(r.ProcessId) with
+                        | true, c -> c.[r.Id] <- r
+                        | false, _ -> 
+                            let c = new Dictionary<JobId, JobRecord>()
+                            c.[r.Id] <- r
+                            cache.Add(r.ProcessId, c))
+                | Choice2Of2 _ ->
+                    ()
+                do! Async.Sleep(interval)
+                return! update ()
+            }
+            update())
 
-    member __.TryGetRecord(jobId : string) =
-        match cache.TryGetValue(jobId) with
-        | true, v -> Some v
-        | false, _ -> None
+    static member AddJobFactory(pid : string, factory : Factory) : unit =
+        factories.[pid] <- factory
+
+    static member GetRecord(pid : string, jobId : string) : JobRecord =
+        timestamps.[pid] <- DateTime.Now
+        cache.[pid].[jobId]
 
 
 

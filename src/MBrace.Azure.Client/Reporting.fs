@@ -24,6 +24,11 @@ type internal JobReporter() =
           Field.create "Return Type" Left (fun p -> p.ReturnType) 
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
           Field.create "Deliveries" Left (fun p -> p.DeliveryCount)
+          Field.create "Execution Time" Left (fun p ->
+            match p.CompletionTime, p.StartTime with
+            | Some t, Some t' -> string(t - t')
+            | None, Some t -> string(DateTimeOffset.UtcNow - t)
+            | _ -> "N/A")
           Field.create "Posted" Left (fun p -> p.CreationTime) 
           Field.create "Started" Left (fun p -> optionToString p.StartTime) 
           Field.create "Completed" Left (fun p -> optionToString p.CompletionTime) 
