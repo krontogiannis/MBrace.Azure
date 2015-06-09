@@ -44,6 +44,9 @@ runtime.AttachLocalWorker(4, 16)
 let ps = runtime.CreateProcess <| cloud { return 42 }
 ps.ShowJobs()
 
+let j = ps.GetJobs() |> Seq.head
+j
+
 runtime.ShowProcesses()
 runtime.ShowWorkers()
 
@@ -65,15 +68,6 @@ ps.ShowJobs()
 runtime.ShowProcesses()
 
 ps.GetJobs()
-|> Seq.map (fun j ->
-    try
-        Some(box <| j.TryGetResult<int * int>())
-    with _ ->
-        try
-            Some(box <| j.TryGetResult<unit>())
-        with _ ->
-            None)
-|> Seq.toArray
 
 
 let ps =

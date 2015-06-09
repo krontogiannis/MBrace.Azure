@@ -75,6 +75,7 @@ type JobCache private () =
             update())
 
     static member AddJobFactory(pid : string, factory : Factory) : unit =
+        timestamps.[pid] <- DateTime.Now
         factories.[pid] <- factory
 
     static member GetRecords(pid : string) : JobRecord [] =
@@ -277,6 +278,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
         let job = new JobRecord(mkPartitionKey pid, jobId)
         assignJobStatus job JobStatus.Posting
         assignJobType job jobType
+        job.ProcessId <- pid
         job.CreationTime <- nullable DateTimeOffset.UtcNow
         job.ReturnType <- returnType
         job.ParentId <- parentId
