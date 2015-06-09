@@ -152,7 +152,7 @@ module private Helpers =
         jobRecord.Status <- nullable(int status)
         
 /// Represents a unit of work that can be executed by the distributed runtime.
-type Job internal (job : JobRecord) =
+type Job internal (config : ConfigurationId, job : JobRecord) =
     let jobType = parseJobType job
     let status = parseJobStatus job
 
@@ -183,25 +183,9 @@ type Job internal (job : JobRecord) =
     /// Approximation of the job's serialized size in bytes.
     member this.JobSize = job.Size.GetValueOrDefault()
 
-
-//    /// Try get job's partial result.
-//    member this.TryGetResult<'T>() = Async.RunSync(this.TryGetResultAsync<'T>())
-//
-//    /// Try get job's partial result.
-//    member this.TryGetResultAsync<'T>() = 
-//        async {
-//                match this.JobType with
-//                | Root | Task | TaskAffined _ -> 
-//                    let! result = ResultCell<'T>.FromPath(config, job.ResultPartition, job.ResultRow).TryGetResult()
-//                    match result with
-//                    | Some r -> return Some r.Value
-//                    | None -> return None
-//                | Parallel(i,m) | ParallelAffined(_,i,m) ->
-//                    return! ResultAggregator.Get(config, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
-//                | Choice _ | ChoiceAffined _ ->
-//                    return! Async.Raise(NotSupportedException("Partial result not supported for Choice."))
-//        }
-        
+    member internal this.ResultPartition = job.ResultPartition
+    member internal this.ResultRow = job.ResultRow
+    member internal this.ConfigurationId = config
 
 namespace MBrace.Azure.Runtime.Info
 
@@ -211,6 +195,7 @@ open MBrace.Runtime.Utils
 open MBrace.Core.Internals
 open MBrace.Azure.Runtime.Utilities
 open Microsoft.WindowsAzure.Storage.Table
+open MBrace.Azure.Runtime.Primitives
 
 
 [<AutoSerializableAttribute(false)>]
@@ -279,7 +264,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
     member this.List(pid : string) =
         async {
             let! jobs = Table.queryPK<JobRecord> config config.RuntimeTable (mkPartitionKey pid)
-            return jobs |> Seq.map (fun job -> new Job(job))
+            return jobs |> Seq.map (fun job -> new Job(config, job))
         }
 
     member this.Heartbeat(pid, jobId) =
@@ -300,9 +285,25 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
         async {
             let! job = Table.read<JobRecord> config config.RuntimeTable (mkPartitionKey pid) jobId
             if job <> null then
-                return new Job(job)
+                return new Job(config, job)
             else
                 return failwithf "Job %A not found" jobId
         }
 
     static member Create (config : ConfigurationId, logger) = new JobManager(config, logger)
+
+    /// Try get job's partial result. Experimental.
+    static member TryGetResultAsync<'T>(job : Job) = 
+        async {
+                match job.JobType with
+                | Root | Task | TaskAffined _ -> 
+                    let! result = ResultCell<'T>.FromPath(job.ConfigurationId, job.ResultPartition, job.ResultRow).TryGetResult()
+                    match result with
+                    | Some r -> return Some r.Value
+                    | None -> return None
+                | Parallel(i,m) | ParallelAffined(_,i,m) ->
+                    return! ResultAggregator.Get(job.ConfigurationId, job.ResultPartition, job.ResultRow, m+1).TryGetResult(i)
+                | Choice _ | ChoiceAffined _ ->
+                    return! Async.Raise(NotSupportedException("Partial result not supported for Choice."))
+        }
+        
