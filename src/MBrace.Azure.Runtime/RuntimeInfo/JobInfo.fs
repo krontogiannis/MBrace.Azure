@@ -33,70 +33,94 @@ type JobRecord (processId, jobId) =
     new () = JobRecord(null, null)
 
 
-type private JobId = string
-type private ProcessId = string
-type private Factory = ProcessId -> Async<JobRecord []>
+[<AutoOpen>]
+module JobCache =
+    type private JobId = string
+    type private ProcessId = string
+    type private Factory = Async<JobRecord []>
+    type private CacheMessage =
+        | AddFactory of pid : ProcessId * factory : Factory
+        | GetRecords of pid : ProcessId * AsyncReplyChannel<JobRecord []>
+        | GetRecord  of pid : ProcessId * jobId : JobId * AsyncReplyChannel<JobRecord>
 
-[<AutoSerializable(false); Sealed; AbstractClass>]
-type JobCache private () =
-    static let cache = new Dictionary<ProcessId, Dictionary<JobId, JobRecord>>()
-    static let factories = new Dictionary<ProcessId, Factory>()
-    static let timestamps = new Dictionary<ProcessId, DateTime>()
-    static let factoryFilter =
-        let factoryInterval = TimeSpan.FromMinutes(2.)
-        fun pid -> DateTime.Now - timestamps.[pid] <= factoryInterval
+    [<AutoSerializable(false); Sealed; AbstractClass>]
+    type JobCache private () =
+        static let cacheAgent =
+            let cache = new Dictionary<ProcessId, Dictionary<JobId, JobRecord>>()
+            let factories = new Dictionary<ProcessId, Factory>()
+            let timestamps = new Dictionary<ProcessId, DateTime>()
+            let updateInterval = 500
+            let factoryFilter = 
+                let factoryInterval = TimeSpan.FromMinutes(2.)
+                fun pid -> DateTime.Now - timestamps.[pid] <= factoryInterval
 
-    static do 
-        Async.Start(
-            let interval = 500
-            let rec update() = async {
-                let! records = factories
-                               |> Seq.filter(fun kvp -> factoryFilter kvp.Key)
-                               |> Seq.map(fun kvp -> kvp.Value(kvp.Key))
-                               |> Async.Parallel
-                               |> Async.Catch
+            let agent = 
+                MailboxProcessor<CacheMessage>.Start(fun inbox ->
+                    let rec loop () = async {
+                        let! msg = inbox.TryReceive(updateInterval)
+                        match msg with
+                        | None ->
+                            let! records = factories
+                                           |> Seq.filter(fun kvp -> factoryFilter kvp.Key)
+                                           |> Seq.map(fun kvp -> kvp.Value)
+                                           |> Async.Parallel
+                                           |> Async.Catch
 
-                match records with
-                | Choice1Of2 records ->
-                    records 
-                    |> Seq.collect id 
-                    |> Seq.iter (fun r -> 
-                        match cache.TryGetValue(r.ProcessId) with
-                        | true, c -> c.[r.Id] <- r
-                        | false, _ -> 
-                            let c = new Dictionary<JobId, JobRecord>()
-                            c.[r.Id] <- r
-                            cache.Add(r.ProcessId, c))
-                | Choice2Of2 _ ->
-                    ()
-                do! Async.Sleep(interval)
-                return! update ()
-            }
-            update())
+                            match records with
+                            | Choice1Of2 records ->
+                                records 
+                                |> Seq.collect id 
+                                |> Seq.iter (fun r -> 
+                                    match cache.TryGetValue(r.ProcessId) with
+                                    | true, c -> c.[r.Id] <- r
+                                    | false, _ -> 
+                                        let c = new Dictionary<JobId, JobRecord>()
+                                        c.[r.Id] <- r
+                                        cache.[r.ProcessId] <- c)
+                            | Choice2Of2 _ -> ()
+                        | Some(AddFactory(pid, factory)) ->
+                            timestamps.[pid] <- DateTime.Now
+                            factories.[pid] <- factory
+                        | Some(GetRecords(pid, ch)) ->
+                            let! records = async {
+                                match cache.TryGetValue(pid) with
+                                | true, jobs when factoryFilter pid ->
+                                    return jobs |> Seq.map (fun kvp -> kvp.Value) |> Seq.toArray
+                                | _ ->
+                                    return! factories.[pid]
+                                }
+                            timestamps.[pid] <- DateTime.Now
+                            ch.Reply(records)
+                        | Some(GetRecord(pid, jobId, ch)) ->
+                            let! record = async {
+                                match cache.TryGetValue(pid) with
+                                | true, jobs when factoryFilter pid && jobs.ContainsKey(jobId) ->
+                                    return cache.[pid].[jobId]
+                                | true, _ ->
+                                    let! jobs = factories.[pid]
+                                    match jobs |> Seq.tryFind (fun r -> r.Id = jobId) with
+                                    | Some r -> return r
+                                    | None -> return null
+                                | false, _ ->
+                                    return null
+                            }
+                            timestamps.[pid] <- DateTime.Now
+                            ch.Reply(record)
+                        return! loop ()
+                    }
+                    loop ())
 
-    static member AddJobFactory(pid : string, factory : Factory) : unit =
-        timestamps.[pid] <- DateTime.Now
-        factories.[pid] <- factory
+            agent.Error.Add(fun e -> Console.WriteLine("JobCache unexpected error {0}", e))
+            agent
 
-    static member GetRecords(pid : string) : JobRecord [] =
-        let records =
-            if factoryFilter pid then
-                cache.[pid] |> Seq.map (fun kvp -> kvp.Value) |> Seq.toArray
-            else
-                Async.RunSync(factories.[pid](pid))
-        timestamps.[pid] <- DateTime.Now
-        records
+        static member AddJobFactory(pid : string, factory : Factory) : unit =
+            cacheAgent.Post(AddFactory(pid, factory))
 
-    static member GetRecord(pid : string, jobId : string) : JobRecord =
-        let record =
-            if factoryFilter pid then
-                cache.[pid].[jobId]
-            else
-                let jobs = Async.RunSync(factories.[pid](pid))
-                jobs |> Seq.iter (fun j -> cache.[pid].[j.Id] <- j)
-                jobs |> Seq.find (fun r -> r.Id = jobId)
-        timestamps.[pid] <- DateTime.Now
-        record
+        static member GetRecords(pid : string) : JobRecord [] =
+            cacheAgent.PostAndReply(fun ch -> GetRecords(pid, ch))
+
+        static member GetRecord(pid : string, jobId : string) : JobRecord =
+            cacheAgent.PostAndReply(fun ch -> GetRecord(pid, jobId, ch))
 
 namespace MBrace.Azure
 
@@ -219,7 +243,7 @@ module private Helpers =
 /// Represents a unit of work that can be executed by the distributed runtime.
 type Job internal (config : ConfigurationId, job : JobRecord) =
     let getJob () =
-        Runtime.Info.JobCache.GetRecord(job.ProcessId, job.Id)
+        JobCache.GetRecord(job.ProcessId, job.Id)
 
     /// Job unique identifier.
     member this.Id = getJob().Id
@@ -361,7 +385,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
         }
 
     member this.AddToCache(pid) =
-        JobCache.AddJobFactory(pid, fun pid -> fetchAll pid)
+        JobCache.AddJobFactory(pid, fetchAll pid)
 
     member this.GetCached(pid : string) =
         JobCache.GetRecords(pid)
