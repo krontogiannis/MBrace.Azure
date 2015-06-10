@@ -121,13 +121,13 @@ with
                         Dependencies            = dependencies
                         ResultCell              = resultCell
                     }
-                jobs.[i] <- job, affinity
+                jobs.[i] <- job, jobId, affinity
 
             let returnType = PrettyPrinters.Type.prettyPrint typeof<'T>
-            let info = jobs |> Seq.map (fun (j, _) -> j.JobId, j.JobType, Configuration.Pickler.ComputeSize(j))
+            let info = jobs |> Seq.map (fun (j, _, _) -> j.JobId, j.JobType, Configuration.Pickler.ComputeSize(j))
             do! this.JobManager.CreateBatch(psInfo.Id, info, returnType, parentJobId, aggregatorPk, aggregatorRk)
             do! this.JobQueue.EnqueueBatch<PickledJob>(jobs, pid = psInfo.Id)
-            let ids = jobs |> Seq.map (fun (j,_) -> j.JobId)
+            let ids = jobs |> Seq.map (fun (j, _, _) -> j.JobId)
             do! this.JobManager.UpdateBatch(psInfo.Id, ids, JobStatus.Posted)
         }
 
@@ -160,7 +160,7 @@ with
             let size = Configuration.Pickler.ComputeSize(job)
             do! this.JobManager.Create(psInfo.Id, jobId, jobType, returnType, parentJobId, size, fst resultCell, snd resultCell)
             this.Logger.Logf "Job Enqueue."
-            do! this.JobQueue.Enqueue<PickledJob>(job, ?affinity = affinity, pid = psInfo.Id)
+            do! this.JobQueue.Enqueue<PickledJob>(job, jobId, ?affinity = affinity, pid = psInfo.Id)
             this.Logger.Logf "Job Enqueue completed. Setting Job as posted."
             do! this.JobManager.Update(psInfo.Id, jobId, JobStatus.Posted)
             this.Logger.Logf "Job %s posted." jobId

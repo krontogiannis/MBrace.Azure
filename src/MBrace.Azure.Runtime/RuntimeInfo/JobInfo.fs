@@ -29,6 +29,7 @@ type JobRecord (processId, jobId) =
     member val CreationTime = Nullable<DateTimeOffset>() with get, set
     member val StartTime = Nullable<DateTimeOffset>() with get, set
     member val CompletionTime = Nullable<DateTimeOffset>() with get, set
+    member val DequeueTime = Nullable<DateTimeOffset>() with get, set
 
     new () = JobRecord(null, null)
 
@@ -159,9 +160,10 @@ type JobType =
 type JobStatus =
     | Posting   = 0
     | Posted    = 1
-    | Active    = 2
-    | Inactive  = 3
+    | Dequeued  = 2
+    | Active    = 3
     | Completed = 4
+    | Inactive  = 5
 
 // Stored in table.
 type private JobKind =
@@ -266,6 +268,8 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     /// The point in time this job was posted.
     member this.CreationTime = getJob().CreationTime.Value
     /// The point in time this job was marked as Active.
+    member this.DequeueTime = getJob().DequeueTime.ToOption()
+    /// The point in time this job was marked as Active.
     member this.StartTime = getJob().StartTime.ToOption()
     /// The point in time this job completed.
     member this.CompletionTime = getJob().CompletionTime.ToOption()
@@ -348,6 +352,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             | JobStatus.Posted    -> job.CreationTime <- nullable DateTimeOffset.UtcNow
             | JobStatus.Active    -> job.StartTime <- nullable DateTimeOffset.UtcNow
             | JobStatus.Completed -> job.CompletionTime <- nullable DateTimeOffset.UtcNow
+            | JobStatus.Dequeued  -> job.DequeueTime <- nullable DateTimeOffset.UtcNow
             | _                   -> failwithf "Invalid status %A" status
 
             deliveryCount |> Option.iter (fun dc -> job.DeliveryCount <- nullable dc)
@@ -424,7 +429,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
                        .AppendFormat("{0} {1} {2} ", job.JobType, getHumanReadableByteSize job.JobSize, job.Status)
             let sb = 
                 match job.CompletionTime with 
-                | Some t -> sb.Append(t - job.StartTime.Value)
+                | Some t -> sb.Append(t - job.DequeueTime.Value)
                 | None -> sb
             sb.AppendLine()
 

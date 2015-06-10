@@ -21,15 +21,16 @@ type internal JobReporter() =
         [ Field.create "Id" Left (fun p -> p.Id)
           Field.create "Type" Right (fun p -> p.JobType)
           Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
-          Field.create "Return Type" Left (fun p -> p.ReturnType) 
+          Field.create "Returns" Left (fun p -> p.ReturnType) 
           Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
           Field.create "Deliveries" Left (fun p -> p.DeliveryCount)
           Field.create "Execution Time" Left (fun p ->
-            match p.CompletionTime, p.StartTime with
+            match p.CompletionTime, p.DequeueTime with
             | Some t, Some t' -> string(t - t')
             | None, Some t -> string(DateTimeOffset.UtcNow - t)
             | _ -> "N/A")
           Field.create "Posted" Left (fun p -> p.CreationTime) 
+          Field.create "Dequeued" Left (fun p -> optionToString p.DequeueTime)
           Field.create "Started" Left (fun p -> optionToString p.StartTime) 
           Field.create "Completed" Left (fun p -> optionToString p.CompletionTime) 
           Field.create "Timestamp" Left (fun p -> p.Timestamp)

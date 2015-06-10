@@ -17,6 +17,7 @@ module private Helpers =
     let MaxLockDuration = TimeSpan.FromMinutes(5.) // 5 minutes, max value
     let MaxTTL = TimeSpan.MaxValue
     let ServerWaitTime = TimeSpan.FromMilliseconds(50.)
+    let JobIdPropertyName = "JobId"
     let AffinityPropertyName = "Affinity"
     let ProcessIdPropertyName = "ProcessId"
     let StreamOffsetPropertyName = "StreamOffset"
@@ -53,7 +54,7 @@ module private Helpers =
 
 
 /// Local wrapper for Service Bus message
-type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, lockToken, body, streamOffset) = 
+type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, jobId, lockToken, body, streamOffset) = 
 
     member this.IsQueueMessage = this.Affinity.IsNone
 
@@ -63,13 +64,15 @@ type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, 
 
     member this.DeliveryCount = deliveryCount
 
-    member this.ProcessId = processId
+    member this.ProcessId = fromGuid processId
     
     member this.StreamOffset = streamOffset
 
+    member this.JobId = fromGuid jobId
+
     member this.GetPayloadAsync<'T>() : Async<'T> = 
         async { 
-            let t = Blob.FromPath(config, processId, body)
+            let t = Blob.FromPath(config, fromGuid processId, body)
             use! stream = t.OpenRead()
             stream.Seek(this.StreamOffset, SeekOrigin.Begin) |> ignore
             return Configuration.Pickler.Deserialize<'T>(stream)
@@ -82,12 +85,13 @@ type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, 
             | false, _ -> None
         let affinity = tryGet AffinityPropertyName
         let deliveryCount = message.DeliveryCount
-        let processId = fromGuid(message.Properties.[ProcessIdPropertyName] :?> Guid)
+        let processId = message.Properties.[ProcessIdPropertyName] :?> Guid
+        let jobId = message.Properties.[JobIdPropertyName] :?> Guid
         let streamPos = Option.fold (fun _ p -> p) 0L (tryGet StreamOffsetPropertyName) 
 
         let lockToken = message.LockToken
         let body = message.GetBody<string>()
-        new QueueMessage(config, affinity, deliveryCount, processId, lockToken, body, streamPos)
+        new QueueMessage(config, affinity, deliveryCount, processId, jobId, lockToken, body, streamPos)
 
 /// Local queue subscription client
 [<AutoSerializable(false)>]
@@ -138,7 +142,7 @@ type internal Topic (config : ConfigurationId, logger : ICloudLogger) =
     
     member this.GetSubscription(affinity) : Subscription = new Subscription(config, logger, affinity)
     
-    member this.EnqueueBatch<'T>(xs : ('T * string) [], pid) = 
+    member this.EnqueueBatch<'T>(xs : ('T * string * string) [], pid) = 
         async { 
             logger.Logf "Creating common job file."
             let temp = Path.GetRandomFileName()
@@ -146,9 +150,10 @@ type internal Topic (config : ConfigurationId, logger : ICloudLogger) =
             let blobName = guid()
             let lastPosition = ref 0L
             let ys = new ResizeArray<BrokeredMessage>(xs.Length)
-            for x, affinity in xs do
+            for x, jobId, affinity in xs do
                 Configuration.Pickler.Serialize(fileStream, x, leaveOpen = true)
                 let msg = new BrokeredMessage(blobName)
+                msg.Properties.Add(JobIdPropertyName, toGuid jobId)
                 msg.Properties.Add(ProcessIdPropertyName, toGuid pid)
                 msg.Properties.Add(AffinityPropertyName, affinity)
                 msg.Properties.Add(StreamOffsetPropertyName, lastPosition.Value)
@@ -171,11 +176,12 @@ type internal Topic (config : ConfigurationId, logger : ICloudLogger) =
                           |> Async.Ignore
         }
     
-    member this.Enqueue<'T>(t : 'T, affinity : string, pid) = 
+    member this.Enqueue<'T>(t : 'T, jobId, affinity : string, pid) = 
         async { 
             let name = guid()
             do! Blob.Create(config, pid, name, fun () -> t) |> Async.Ignore
             let msg = new BrokeredMessage(name)
+            msg.Properties.Add(JobIdPropertyName, toGuid jobId)
             msg.Properties.Add(AffinityPropertyName, affinity)
             msg.Properties.Add(ProcessIdPropertyName, toGuid pid)
             do! tc.SendAsync(msg)
@@ -218,7 +224,7 @@ type internal Queue (config : ConfigurationId, logger : ICloudLogger) =
             do! queue.AbandonAsync(message.LockToken)
         }
 
-    member this.EnqueueBatch<'T>(xs : 'T [], pid) = 
+    member this.EnqueueBatch<'T>(xs : ('T * string) [], pid) = 
         async { 
             logger.Logf "Creating common job file."
             let temp = Path.GetRandomFileName()
@@ -226,9 +232,10 @@ type internal Queue (config : ConfigurationId, logger : ICloudLogger) =
             let blobName = guid()
             let lastPosition = ref 0L
             let ys = new ResizeArray<BrokeredMessage>(xs.Length)
-            for x in xs do
+            for x, jobId in xs do
                 Configuration.Pickler.Serialize(fileStream, x, leaveOpen = true)
                 let msg = new BrokeredMessage(blobName)
+                msg.Properties.Add(JobIdPropertyName, toGuid jobId)
                 msg.Properties.Add(ProcessIdPropertyName, toGuid pid)
                 msg.Properties.Add(StreamOffsetPropertyName, lastPosition.Value)
                 ys.Add(msg)
@@ -250,11 +257,12 @@ type internal Queue (config : ConfigurationId, logger : ICloudLogger) =
                           |> Async.Ignore
         }
     
-    member this.Enqueue<'T>(t : 'T, pid) = 
+    member this.Enqueue<'T>(t : 'T, jobId, pid) = 
         async { 
             let name = guid()
             do! Blob.Create(config, pid, name, fun () -> t) |> Async.Ignore
             let msg = new BrokeredMessage(name)
+            msg.Properties.Add(JobIdPropertyName, toGuid jobId)
             msg.Properties.Add(ProcessIdPropertyName, toGuid pid)
             do! queue.SendAsync(msg)
         }
@@ -333,23 +341,23 @@ type JobQueue internal (queue : Queue, topic : Topic, logger) =
             return msg
         }
 
-    member this.Enqueue<'T>(item : 'T, pid : string, ?affinity) : Async<unit> =
+    member this.Enqueue<'T>(item : 'T, jobId, pid : string, ?affinity) : Async<unit> =
         async {
             match affinity with
-            | None -> return! queue.Enqueue<'T>(item, pid)
-            | Some affinity -> return! topic.Enqueue<'T>(item, affinity, pid)
+            | None -> return! queue.Enqueue<'T>(item, jobId, pid)
+            | Some affinity -> return! topic.Enqueue<'T>(item, jobId, affinity, pid)
         }
     
-    member this.EnqueueBatch<'T>(xs : 'T [], pid : string) = queue.EnqueueBatch<'T>(xs, pid)
+    member this.EnqueueBatch<'T>(xs : ('T * string) [], pid : string) = queue.EnqueueBatch<'T>(xs, pid)
 
-    member this.EnqueueBatch<'T>(xs : ('T * string option) [], pid : string) = async {
-            let queueTasks = new ResizeArray<'T>()
-            let topicTasks = new ResizeArray<'T * string>()
+    member this.EnqueueBatch<'T>(xs : ('T * string * string option) [], pid : string) = async {
+            let queueTasks = new ResizeArray<'T * string>()
+            let topicTasks = new ResizeArray<'T *string * string>()
 
-            for (t,a) in xs do
+            for (t,id, a) in xs do
                 match a with
-                | Some a -> topicTasks.Add(t,a)
-                | None -> queueTasks.Add(t)
+                | Some a -> topicTasks.Add(t, id, a)
+                | None -> queueTasks.Add(t, id)
             
             let! handle1 = 
                 if topicTasks.Count = 0 then async.Zero() 

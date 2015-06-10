@@ -94,6 +94,8 @@ type internal Worker () =
                             config.Logger.Logf "Increase Dequeued Jobs %d" jc
                             let! _ = Async.StartChild <| async { 
                                 try
+                                    config.Logger.Logf "Dequeued message %A" message.JobId
+                                    do! config.State.JobManager.Update(message.ProcessId, message.JobId, JobStatus.Dequeued, config.State.WorkerManager.Current.Id, message.DeliveryCount)
                                     config.Logger.Log "Downloading PickledJob"
                                     let! pickledJob = Async.Catch <| message.GetPayloadAsync<PickledJob>()
                                     match pickledJob with

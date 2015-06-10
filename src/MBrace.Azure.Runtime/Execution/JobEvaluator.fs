@@ -103,7 +103,7 @@ and [<AutoSerializable(false)>]
 
                 logf "Starting job\n%s" (string job) 
                 logf "Delivery count : %d" msg.DeliveryCount
-                do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Active, staticConfiguration.State.WorkerManager.Current.Id, msg.DeliveryCount) // TODO : handle error
+                do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Active) // TODO : handle error
                 
                 logf "Starting heartbeat loop for Job %s" job.JobId
                 let! _ = staticConfiguration.State.JobManager.Heartbeat(job.ProcessInfo.Id, job.JobId)
