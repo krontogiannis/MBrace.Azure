@@ -276,6 +276,8 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     member internal this.ResultRow = getJob().ResultRow
     member internal this.ConfigurationId = config
 
+    override this.GetHashCode() = hash this.Id
+
     override this.Equals(obj : obj) =
         match obj with
         | :? Job as j -> this.Id = j.Id
