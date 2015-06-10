@@ -48,34 +48,6 @@ type internal JobReporter() =
         sb.AppendLine()
           .AppendLine(Record.PrettyPrint(template, ps)).ToString()
 
-//    static member ReportTreeView(jobs : Job seq, title) =
-//        let sb = new StringBuilder()
-//        let _ = sb.AppendLine(title)
-//
-//        let append (job : Job) =
-//            let sb = sb.AppendFormat("{0}...{1} ",job.Id.Substring(0,7), job.Id.Substring(job.Id.Length - 3))
-//                       .AppendFormat("{0} {1} {2} ", job.JobType, getHumanReadableByteSize job.JobSize, job.Status)
-//            let sb = if job.CompletionTime.HasValue then
-//                        sb.Append(job.CompletionTime.Value - job.StartTime.Value)
-//                     else sb
-//            sb.AppendLine()
-//
-//        let root = jobs |> Seq.find (fun j -> j.JobType = Root)
-//
-//        let child (current : Job) =
-//            jobs |> Seq.filter (fun j -> j.ParentId = current.Id)
-//
-//        let rec treeview (current : Job) depth : unit =
-//            if depth > 0 then
-//                for i = 0 to 4 * (depth-1) - 1 do 
-//                    ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
-//                let _ = sb.Append("├───") // fancy
-//                ()
-//            let _ = append current
-//            child current |> Seq.iter (fun j -> treeview j (depth + 1))
-//        treeview root 0
-//        sb.ToString()
-
 type internal WorkerReporter() = 
     static let template : Field<WorkerRef> list = 
         let double_printer (value : double) = 

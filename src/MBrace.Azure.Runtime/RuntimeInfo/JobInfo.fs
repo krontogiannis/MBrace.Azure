@@ -264,9 +264,8 @@ open MBrace.Azure
 open MBrace.Runtime.Utils
 open MBrace.Core.Internals
 open MBrace.Azure.Runtime.Utilities
-open Microsoft.WindowsAzure.Storage.Table
 open MBrace.Azure.Runtime.Primitives
-
+open System.Text
 
 [<AutoSerializableAttribute(false)>]
 type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
@@ -320,13 +319,10 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             assignJobStatus job status
             
             match status with
-            | JobStatus.Posted ->
-                job.CreationTime <- nullable DateTimeOffset.UtcNow
-            | JobStatus.Active -> 
-                job.StartTime <- nullable DateTimeOffset.UtcNow
-            | JobStatus.Completed ->
-                job.CompletionTime <- nullable DateTimeOffset.UtcNow
-            | _ -> failwithf "Invalid status %A" status
+            | JobStatus.Posted    -> job.CreationTime <- nullable DateTimeOffset.UtcNow
+            | JobStatus.Active    -> job.StartTime <- nullable DateTimeOffset.UtcNow
+            | JobStatus.Completed -> job.CompletionTime <- nullable DateTimeOffset.UtcNow
+            | _                   -> failwithf "Invalid status %A" status
 
             deliveryCount |> Option.iter (fun dc -> job.DeliveryCount <- nullable dc)
             workerId |> Option.iter (fun wid -> job.WorkerId <- wid)
@@ -376,6 +372,8 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
 
     static member Create (config : ConfigurationId, logger) = new JobManager(config, logger)
 
+    // Non-'public' APIs that might come useful for debugging.
+
     /// Try get job's partial result. Experimental.
     static member TryGetResultAsync<'T>(job : Job) = 
         async {
@@ -391,3 +389,32 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
                     return! Async.Raise(NotSupportedException("Partial result not supported for Choice."))
         }
         
+    /// Show jobs as a tree view.
+    static member ReportTreeView(jobs : Job seq) =
+        let sb = new StringBuilder()
+
+        let append (job : Job) =
+            let sb = sb.AppendFormat("{0}...{1} ",job.Id.Substring(0,7), job.Id.Substring(job.Id.Length - 3))
+                       .AppendFormat("{0} {1} {2} ", job.JobType, getHumanReadableByteSize job.JobSize, job.Status)
+            let sb = 
+                match job.CompletionTime with 
+                | Some t -> sb.Append(t - job.StartTime.Value)
+                | None -> sb
+            sb.AppendLine()
+
+        let root = jobs |> Seq.find (fun j -> j.JobType = Root)
+
+        let child (current : Job) =
+            jobs |> Seq.filter (fun j -> j.ParentId = current.Id)
+
+        let rec treeview (current : Job) depth : unit =
+            if depth > 0 then
+                for i = 0 to 4 * (depth-1) - 1 do 
+                    ignore <| sb.Append(if i % 4 = 0 then '|' else ' ')
+                let _ = sb.Append("├───") // fancy
+                ()
+            let _ = append current
+            child current |> Seq.iter (fun j -> treeview j (depth + 1))
+        treeview root 0
+        sb.ToString()
+
