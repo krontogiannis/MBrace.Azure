@@ -416,5 +416,5 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             let _ = append current
             child current |> Seq.iter (fun j -> treeview j (depth + 1))
         treeview root 0
-        sb.ToString()
+        Console.WriteLine(sb)
 

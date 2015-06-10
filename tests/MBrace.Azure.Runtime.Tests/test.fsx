@@ -62,8 +62,11 @@ let ps =
     |> runtime.CreateProcess
 
 ps.AwaitResult()
-//ps.ShowJobsTree()
 ps.ShowJobs()
+
+
+let ps = runtime.CreateProcess <| cloud { return 42 }
+MBrace.Azure.Runtime.Info.JobManager.ReportTreeView(ps.GetJobs())
 
 runtime.ShowProcesses()
 
