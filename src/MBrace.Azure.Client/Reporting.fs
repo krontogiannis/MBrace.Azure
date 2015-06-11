@@ -11,6 +11,10 @@ open MBrace.Azure
 open System.Text
 open MBrace.Azure.Runtime.Utilities
 
+[<AutoOpen>]
+module private Helpers =
+    let protect<'R> (proj : 'R -> string) = fun u -> try proj u with _ -> "Evaluation failed"
+
 type internal JobReporter() = 
     static let optionToString (value : Option<'T>) = 
         match value with 
@@ -18,22 +22,22 @@ type internal JobReporter() =
         | None -> "N/A" 
 
     static let template : Field<Job> list = 
-        [ Field.create "Id" Left (fun p -> p.Id)
-          Field.create "Type" Right (fun p -> p.JobType)
-          Field.create "Status" Right (fun p -> sprintf "%A" p.Status)
-          Field.create "Returns" Left (fun p -> p.ReturnType) 
-          Field.create "Size" Left (fun p -> getHumanReadableByteSize p.JobSize)
-          Field.create "Deliveries" Left (fun p -> p.DeliveryCount)
-          Field.create "Execution Time" Left (fun p ->
+        [ Field.create "Id" Left (protect (fun p -> p.Id))
+          Field.create "Type" Right (protect(fun p -> sprintf "%A" p.JobType))
+          Field.create "Status" Right (protect(fun p -> sprintf "%A" p.Status))
+          Field.create "Returns" Left (protect(fun p -> p.ReturnType))
+          Field.create "Size" Left (protect(fun p -> getHumanReadableByteSize p.JobSize))
+          Field.create "Deliveries" Left (protect(fun p -> string p.DeliveryCount))
+          Field.create "Execution Time" Left (protect(fun p ->
             match p.CompletionTime, p.DequeueTime with
             | Some t, Some t' -> string(t - t')
             | None, Some t -> string(DateTimeOffset.UtcNow - t)
-            | _ -> "N/A")
-          Field.create "Posted" Left (fun p -> p.CreationTime) 
-          Field.create "Dequeued" Left (fun p -> optionToString p.DequeueTime)
-          Field.create "Started" Left (fun p -> optionToString p.StartTime) 
-          Field.create "Completed" Left (fun p -> optionToString p.CompletionTime) 
-          Field.create "Timestamp" Left (fun p -> p.Timestamp)
+            | _ -> "N/A"))
+          Field.create "Posted" Left (protect(fun p -> string p.CreationTime))
+          Field.create "Dequeued" Left (protect(fun p -> optionToString p.DequeueTime))
+          Field.create "Started" Left (protect(fun p -> optionToString p.StartTime))
+          Field.create "Completed" Left (protect(fun p -> optionToString p.CompletionTime))
+          Field.create "Timestamp" Left (protect(fun p -> string p.Timestamp))
         ]
     
     static member Report(jobs : Job seq, title) = 
@@ -53,18 +57,18 @@ type internal WorkerReporter() =
     static let template : Field<WorkerRef> list = 
         let double_printer (value : double) = 
             if value < 0. then "N/A" else sprintf "%.1f" value
-        [ Field.create "Id" Left (fun p -> p.Id)
-          Field.create "Status" Left (fun p -> string p.Status)
-          Field.create "% CPU / Cores" Center (fun p -> sprintf "%s / %d" (double_printer p.CPU) p.ProcessorCount)
-          Field.create "% Memory / Total(MB)" Center (fun p -> 
+        [ Field.create "Id" Left (protect(fun p -> p.Id))
+          Field.create "Status" Left (protect(fun p -> string p.Status))
+          Field.create "% CPU / Cores" Center (protect(fun p -> sprintf "%s / %d" (double_printer p.CPU) p.ProcessorCount))
+          Field.create "% Memory / Total(MB)" Center (protect(fun p -> 
             let memPerc = 100. * p.Memory / p.TotalMemory |> double_printer
-            sprintf "%s / %s" memPerc <| double_printer p.TotalMemory)
-          Field.create "Network(ul/dl : KB/s)" Center (fun n -> sprintf "%s / %s" <| double_printer n.NetworkUp <| double_printer n.NetworkDown)
-          Field.create "Jobs" Center (fun p -> sprintf "%d / %d" p.ActiveJobs p.MaxJobCount)
-          Field.create "Hostname" Left (fun p -> p.Hostname)
-          Field.create "Process Id" Right (fun p -> p.ProcessId)
-          Field.create "Heartbeat" Left (fun p -> p.HeartbeatTime)
-          Field.create "Initialization Time" Left (fun p -> p.InitializationTime) 
+            sprintf "%s / %s" memPerc <| double_printer p.TotalMemory))
+          Field.create "Network(ul/dl : KB/s)" Center (protect(fun n -> sprintf "%s / %s" <| double_printer n.NetworkUp <| double_printer n.NetworkDown))
+          Field.create "Jobs" Center (protect(fun p -> sprintf "%d / %d" p.ActiveJobs p.MaxJobCount))
+          Field.create "Hostname" Left (protect(fun p -> p.Hostname))
+          Field.create "Process Id" Right (protect(fun p -> string p.ProcessId))
+          Field.create "Heartbeat" Left (protect(fun p -> string p.HeartbeatTime))
+          Field.create "Initialization Time" Left (protect(fun p -> string p.InitializationTime))
         ]
     
     static member Report(workers : WorkerRef seq, title, borders) = 
@@ -75,9 +79,9 @@ type internal WorkerReporter() =
 
 type internal LogReporter() = 
     static let template : Field<LogRecord> list = 
-        [ Field.create "Source" Left (fun p -> p.PartitionKey)
-          Field.create "Timestamp" Right (fun p -> let pt = p.Time in pt.ToString("ddMMyyyy HH:mm:ss.fff zzz"))
-          Field.create "Message" Left (fun p -> p.Message) ]
+        [ Field.create "Source" Left (protect(fun p -> p.PartitionKey))
+          Field.create "Timestamp" Right (protect(fun p -> let pt = p.Time in pt.ToString("ddMMyyyy HH:mm:ss.fff zzz")))
+          Field.create "Message" Left (protect(fun p -> p.Message)) ]
     
     static member Report(logs : LogRecord seq, title, borders) = 
         let ls = logs 
