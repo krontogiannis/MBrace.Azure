@@ -60,11 +60,34 @@ p.Send("google.com")
 
 
 
+let ns = NamespaceManager.CreateFromConnectionString(sbus)
+let topic = "topictest"
+let td = new TopicDescription(topic)
+ns.CreateTopic(td)
+
+let client = TopicClient.CreateFromConnectionString(sbus, topic)
+
+let sub s = 
+    let sd = new SubscriptionDescription(topic, s)
+    let expr = "foo = '" + s + "' OR foo = ''"
+    let filter = new SqlFilter(expr)
+    ns.CreateSubscription(sd, filter)
+    SubscriptionClient.CreateFromConnectionString(sbus, topic, s)
+
+let s1 = sub "sub1"
+let s2 = sub "sub2"
+
+let bm = new BrokeredMessage("1")
+bm.Properties.Add("foo", "sub1")
+client.Send(bm)
+
+let bm = new BrokeredMessage("2")
+bm.Properties.Add("foo", "")
+client.Send(bm)
 
 
-
-
-
+s1.Receive()
+s2.Receive()
 
 
 let ns = NamespaceManager.CreateFromConnectionString(sbus)

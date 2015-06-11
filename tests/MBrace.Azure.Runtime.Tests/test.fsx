@@ -38,8 +38,10 @@ runtime.AttachClientLogger(new ConsoleLogger())
 //runtime.Reset()
 //Runtime.Reset(config, reactivate = false)
 // local only---
-runtime.AttachLocalWorker(1, 16)
+runtime.AttachLocalWorker(4, 16)
 //---
+
+let ps = runtime.CreateProcess (Seq.init 100 (fun i -> cloud { return i}) |> Cloud.Parallel)
 
 let ps = runtime.CreateProcess <| cloud { return 42 }
 ps.ShowJobs()

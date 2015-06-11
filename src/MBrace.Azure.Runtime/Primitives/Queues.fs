@@ -16,7 +16,7 @@ module private Helpers =
     let RenewLockInverval = 10000
     let MaxLockDuration = TimeSpan.FromMinutes(5.) // 5 minutes, max value
     let MaxTTL = TimeSpan.MaxValue
-    let ServerWaitTime = TimeSpan.FromMilliseconds(50.)
+    //let ServerWaitTime = TimeSpan.FromMilliseconds(50.)
     let JobIdPropertyName = "JobId"
     let AffinityPropertyName = "Affinity"
     let ProcessIdPropertyName = "ProcessId"
@@ -107,7 +107,8 @@ type internal Subscription (config : ConfigurationId, logger : ICloudLogger, aff
             sd.DefaultMessageTimeToLive <- MaxTTL
             sd.LockDuration <- MaxLockDuration
             sd.AutoDeleteOnIdle <- SubscriptionAutoDeleteInterval
-            let filter = new SqlFilter(sprintf "%s = '%s'" AffinityPropertyName affinity)
+            let expr = sprintf "%s = '%s' OR %s = ''" AffinityPropertyName affinity AffinityPropertyName
+            let filter = new SqlFilter(expr)
             ns.CreateSubscription(sd, filter) |> ignore
 
     let sub = cp.SubscriptionClient(config.RuntimeTopic, subscription)
@@ -124,7 +125,7 @@ type internal Subscription (config : ConfigurationId, logger : ICloudLogger, aff
     
     member this.TryDequeue<'T>() : Async<QueueMessage option> = 
         async { 
-            let! msg = sub.ReceiveAsync(ServerWaitTime)
+            let! msg = sub.ReceiveAsync()
             if msg = null then 
                 return None
             else 
@@ -269,7 +270,7 @@ type internal Queue (config : ConfigurationId, logger : ICloudLogger) =
     
     member this.TryDequeue<'T>() : Async<QueueMessage option> = 
         async { 
-            let! msg = queue.ReceiveAsync(ServerWaitTime)
+            let! msg = queue.ReceiveAsync()
             if msg = null then 
                 return None
             else
@@ -297,11 +298,46 @@ type internal Queue (config : ConfigurationId, logger : ICloudLogger) =
 
 // Unified access to Queue/Topic/Subscription.
 [<AutoSerializable(false)>]
-type JobQueue internal (queue : Queue, topic : Topic, logger) = 
+type JobQueue internal (queue : Queue, topic : Topic, logger : ICloudLogger) = 
     let mutable affinity : string option = None
     let mutable subscription : Subscription option = None 
-    let mutable flag = false
 
+    let queueMessage : QueueMessage option ref = ref None
+    let topicMessage : QueueMessage option ref = ref None
+
+    member this.AcceptMessages() =
+        let rec mkLoop (recv : Async<QueueMessage option>) (slot : QueueMessage option ref) =
+            async {
+                let! newMessage = async {
+                    match slot.Value with
+                    | Some _ -> 
+                        do! Async.Sleep(20)
+                        return None
+                    | None -> 
+                        let! res = Async.Catch recv
+                        match res with
+                        | Choice1Of2 m -> return m
+                        | Choice2Of2 e ->
+                            logger.Logf "JobQueue Dequeue failed with %A" e
+                            return None
+                }
+                match newMessage with
+                | None -> ()
+                | Some m -> slot := Some m
+                return! mkLoop recv slot
+            }
+
+        Async.Start(mkLoop (queue.TryDequeue()) queueMessage)
+        Async.Start(mkLoop (subscription.Value.TryDequeue()) topicMessage)
+
+    member this.TryDequeue() : Async<QueueMessage option> =
+        async {
+            match queueMessage.Value, topicMessage.Value with
+            | (Some _ as m), _ -> queueMessage := None; return m
+            | _, (Some _ as m) -> topicMessage := None; return m
+            | None, None -> return None
+        }
+    
     member this.Affinity 
         with get () = affinity.Value
         and set aff = 
@@ -320,27 +356,6 @@ type JobQueue internal (queue : Queue, topic : Topic, logger) =
             else do! subscription.Value.AbandonAsync(message)
         }
 
-    member this.TryDequeue() : Async<QueueMessage option> =
-        async {
-            let! msg = async {
-                match flag, subscription with
-                | _, None -> 
-                    return! queue.TryDequeue()
-                | false, Some subscription ->
-                    let! msg = subscription.TryDequeue()
-                    match msg with
-                    | Some _ -> return msg
-                    | None -> return! queue.TryDequeue()
-                | true, Some subscription ->
-                    let! msg = queue.TryDequeue()
-                    match msg with
-                    | Some _ -> return msg
-                    | None -> return! subscription.TryDequeue() 
-            }
-            flag <- not flag
-            return msg
-        }
-
     member this.Enqueue<'T>(item : 'T, jobId, pid : string, ?affinity) : Async<unit> =
         async {
             match affinity with
@@ -352,7 +367,7 @@ type JobQueue internal (queue : Queue, topic : Topic, logger) =
 
     member this.EnqueueBatch<'T>(xs : ('T * string * string option) [], pid : string) = async {
             let queueTasks = new ResizeArray<'T * string>()
-            let topicTasks = new ResizeArray<'T *string * string>()
+            let topicTasks = new ResizeArray<'T * string * string>()
 
             for (t,id, a) in xs do
                 match a with

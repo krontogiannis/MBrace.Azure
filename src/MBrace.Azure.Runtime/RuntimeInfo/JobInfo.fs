@@ -430,7 +430,7 @@ type JobManager private (config : ConfigurationId, logger : ICloudLogger) =
             let sb = 
                 match job.CompletionTime with 
                 | Some t -> sb.Append(t - job.DequeueTime.Value)
-                | None -> sb
+                | None -> sb.Append(DateTimeOffset.UtcNow - job.DequeueTime.Value)
             sb.AppendLine()
 
         let root = jobs |> Seq.find (fun j -> j.JobType = Root)

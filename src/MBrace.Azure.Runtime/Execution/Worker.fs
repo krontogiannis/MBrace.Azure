@@ -64,11 +64,8 @@ type internal Worker () =
             // queueFault indicated if last dequeue action resulted in exception
 
             let rec workerLoop queueFault (state : WorkerState) = async {
-                let! message = async {
-                    if inbox.CurrentQueueLength > 0 then 
-                        return! inbox.TryReceive()
-                    else return None
-                }
+                let! message = inbox.TryReceive(10)
+
                 match message, state with
                 | None, Running(config, _) ->
                     if currentJobCount >= config.MaxConcurrentJobs then
@@ -91,7 +88,7 @@ type internal Worker () =
                                 do! config.State.WorkerManager.SetCurrentAsRunning()
                                 config.Logger.Logf "Done"
                             config.State.WorkerManager.SetJobCountLocal(jc)
-                            config.Logger.Logf "Increase Dequeued Jobs %d" jc
+                            config.Logger.Logf "Increase Dequeued Jobs %d/%d" jc config.MaxConcurrentJobs
                             let! _ = Async.StartChild <| async { 
                                 try
                                     config.Logger.Logf "Dequeued message %A" message.JobId
@@ -118,7 +115,7 @@ type internal Worker () =
                                 finally
                                     let jc = Interlocked.Decrement &currentJobCount
                                     config.State.WorkerManager.SetJobCountLocal(jc)
-                                    config.Logger.Logf "Decrease Dequeued Jobs %d" jc
+                                    config.Logger.Logf "Decrease Dequeued Jobs %d/%d" jc config.MaxConcurrentJobs
                             }
                             return! workerLoop false state
                         | Choice2Of2 ex ->
@@ -130,6 +127,7 @@ type internal Worker () =
                     do! Async.Sleep receiveTimeout
                     return! workerLoop false state
                 | Some(Start(config, handle)), Idle ->
+                    config.State.JobQueue.AcceptMessages()
                     return! workerLoop false (Running(config, handle))
                 | Some(Stop ch), Running(config, handle) ->
                     do! waitForPendingJobs config
