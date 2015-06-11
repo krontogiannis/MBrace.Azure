@@ -107,7 +107,7 @@ type internal Subscription (config : ConfigurationId, logger : ICloudLogger, aff
             sd.DefaultMessageTimeToLive <- MaxTTL
             sd.LockDuration <- MaxLockDuration
             sd.AutoDeleteOnIdle <- SubscriptionAutoDeleteInterval
-            let expr = sprintf "%s = '%s' OR %s = ''" AffinityPropertyName affinity AffinityPropertyName
+            let expr = sprintf "%s = '%s'" AffinityPropertyName affinity
             let filter = new SqlFilter(expr)
             ns.CreateSubscription(sd, filter) |> ignore
 

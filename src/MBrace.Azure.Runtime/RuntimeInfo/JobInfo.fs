@@ -118,10 +118,14 @@ module JobCache =
             cacheAgent.Post(AddFactory(pid, factory))
 
         static member GetRecords(pid : string) : JobRecord [] =
-            cacheAgent.PostAndReply(fun ch -> GetRecords(pid, ch))
+            match cacheAgent.PostAndReply(fun ch -> GetRecords(pid, ch)) with
+            | null -> Array.empty
+            | r -> r
 
         static member GetRecord(pid : string, jobId : string) : JobRecord =
-            cacheAgent.PostAndReply(fun ch -> GetRecord(pid, jobId, ch))
+            match cacheAgent.PostAndReply(fun ch -> GetRecord(pid, jobId, ch)) with
+            | null -> raise(KeyNotFoundException(sprintf "Record %s/%s not found." pid jobId))
+            | r -> r
 
 namespace MBrace.Azure
 

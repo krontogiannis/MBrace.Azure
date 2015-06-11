@@ -26,9 +26,8 @@ type Process internal (config, pid : string, ty : Type, processManager : Process
         new Live<_>((fun () -> processManager.GetProcess(pid)), initial = Choice2Of2(exn ("Process not initialized")), 
                     keepLast = true, interval = 500)
 
-    let getJobs =
-        jobManager.AddToCache(pid)
-        fun () -> jobManager.GetCached(pid)
+    do jobManager.AddToCache(pid)
+    let getJobs() = jobManager.GetCached(pid)
 
     let logger = new ProcessLogger(config, pid)
     let dcts = lazy DistributedCancellationTokenSource.FromPath(config, proc.Value.CancellationPartitionKey, proc.Value.CancellationRowKey)
