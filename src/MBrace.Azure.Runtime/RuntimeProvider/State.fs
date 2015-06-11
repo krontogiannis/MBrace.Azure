@@ -160,7 +160,7 @@ with
             let size = Configuration.Pickler.ComputeSize(job)
             do! this.JobManager.Create(psInfo.Id, jobId, jobType, returnType, parentJobId, size, fst resultCell, snd resultCell)
             this.Logger.Logf "Job Enqueue."
-            do! this.JobQueue.Enqueue<PickledJob>(job, jobId, ?affinity = affinity, pid = psInfo.Id)
+            do! this.JobQueue.Enqueue<PickledJob>(job, jobId, pid = psInfo.Id, isRoot = (JobType.Root = jobType),  ?affinity = affinity)
             this.Logger.Logf "Job Enqueue completed. Setting Job as posted."
             do! this.JobManager.Update(psInfo.Id, jobId, JobStatus.Posted)
             this.Logger.Logf "Job %s posted." jobId

@@ -16,7 +16,7 @@ module private Helpers =
     let RenewLockInverval = 10000
     let MaxLockDuration = TimeSpan.FromMinutes(5.) // 5 minutes, max value
     let MaxTTL = TimeSpan.MaxValue
-    //let ServerWaitTime = TimeSpan.FromMilliseconds(50.)
+    let IsRootPropertyName = "IsRoot"
     let JobIdPropertyName = "JobId"
     let AffinityPropertyName = "Affinity"
     let ProcessIdPropertyName = "ProcessId"
@@ -54,7 +54,9 @@ module private Helpers =
 
 
 /// Local wrapper for Service Bus message
-type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, jobId, lockToken, body, streamOffset) = 
+type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, jobId, lockToken, body, streamOffset, isRoot) = 
+
+    member this.IsRoot = isRoot
 
     member this.IsQueueMessage = this.Affinity.IsNone
 
@@ -88,10 +90,10 @@ type QueueMessage(config : ConfigurationId, affinity, deliveryCount, processId, 
         let processId = message.Properties.[ProcessIdPropertyName] :?> Guid
         let jobId = message.Properties.[JobIdPropertyName] :?> Guid
         let streamPos = Option.fold (fun _ p -> p) 0L (tryGet StreamOffsetPropertyName) 
-
+        let isRoot = Option.fold (fun _ p -> p) false (tryGet IsRootPropertyName) 
         let lockToken = message.LockToken
         let body = message.GetBody<string>()
-        new QueueMessage(config, affinity, deliveryCount, processId, jobId, lockToken, body, streamPos)
+        new QueueMessage(config, affinity, deliveryCount, processId, jobId, lockToken, body, streamPos, isRoot)
 
 /// Local queue subscription client
 [<AutoSerializable(false)>]
@@ -177,7 +179,7 @@ type internal Topic (config : ConfigurationId, logger : ICloudLogger) =
                           |> Async.Ignore
         }
     
-    member this.Enqueue<'T>(t : 'T, jobId, affinity : string, pid) = 
+    member this.Enqueue<'T>(t : 'T, jobId, affinity : string, pid, isRoot) = 
         async { 
             let name = guid()
             do! Blob.Create(config, pid, name, fun () -> t) |> Async.Ignore
@@ -185,6 +187,7 @@ type internal Topic (config : ConfigurationId, logger : ICloudLogger) =
             msg.Properties.Add(JobIdPropertyName, toGuid jobId)
             msg.Properties.Add(AffinityPropertyName, affinity)
             msg.Properties.Add(ProcessIdPropertyName, toGuid pid)
+            msg.Properties.Add(IsRootPropertyName, isRoot)
             do! tc.SendAsync(msg)
         }
 
@@ -258,13 +261,14 @@ type internal Queue (config : ConfigurationId, logger : ICloudLogger) =
                           |> Async.Ignore
         }
     
-    member this.Enqueue<'T>(t : 'T, jobId, pid) = 
+    member this.Enqueue<'T>(t : 'T, jobId, pid, isRoot) = 
         async { 
             let name = guid()
             do! Blob.Create(config, pid, name, fun () -> t) |> Async.Ignore
             let msg = new BrokeredMessage(name)
             msg.Properties.Add(JobIdPropertyName, toGuid jobId)
             msg.Properties.Add(ProcessIdPropertyName, toGuid pid)
+            msg.Properties.Add(IsRootPropertyName, isRoot)
             do! queue.SendAsync(msg)
         }
     
@@ -356,11 +360,11 @@ type JobQueue internal (queue : Queue, topic : Topic, logger : ICloudLogger) =
             else do! subscription.Value.AbandonAsync(message)
         }
 
-    member this.Enqueue<'T>(item : 'T, jobId, pid : string, ?affinity) : Async<unit> =
+    member this.Enqueue<'T>(item : 'T, jobId, pid : string, isRoot, ?affinity) : Async<unit> =
         async {
             match affinity with
-            | None -> return! queue.Enqueue<'T>(item, jobId, pid)
-            | Some affinity -> return! topic.Enqueue<'T>(item, jobId, affinity, pid)
+            | None -> return! queue.Enqueue<'T>(item, jobId, pid, isRoot)
+            | Some affinity -> return! topic.Enqueue<'T>(item, jobId, affinity, pid, isRoot)
         }
     
     member this.EnqueueBatch<'T>(xs : ('T * string) [], pid : string) = queue.EnqueueBatch<'T>(xs, pid)

@@ -44,13 +44,24 @@ runtime.AttachLocalWorker(4, 16)
 let ps = runtime.CreateProcess (Seq.init 100 (fun i -> cloud { return i}) |> Cloud.Parallel)
 
 let ps = runtime.CreateProcess <| cloud { return 42 }
-let j = ps.GetJobs()
-let m = j |> Seq.head
-printfn "%O" m
 
+ps.ShowJobs()
 
 runtime.ShowProcesses()
 runtime.ShowWorkers()
+
+#r "MBrace.Flow"
+open MBrace.Flow
+
+let proc = 
+    CloudFlow.OfArray [|1..10000|]
+    |> CloudFlow.mapLocal (fun x -> local { return x * x })
+    |> CloudFlow.toArray
+    |> runtime.CreateProcess
+
+proc.ShowInfo()
+proc.ShowJobs()
+
 
 let ps =
     [1..5]

@@ -91,11 +91,16 @@ type internal Worker () =
                             config.Logger.Logf "Increase Dequeued Jobs %d/%d" jc config.MaxConcurrentJobs
                             let! _ = Async.StartChild <| async { 
                                 try
-                                    config.Logger.Logf "Dequeued message %A" message.JobId
-                                    let! res = Async.Catch <| config.State.JobManager.Update(message.ProcessId, message.JobId, JobStatus.Dequeued, config.State.WorkerManager.Current.Id, message.DeliveryCount)
+                                    let! res = Async.Catch <| async {
+                                        if message.IsRoot then
+                                            config.Logger.Logf "Starting Root job for Process Id : %s" message.ProcessId
+                                            do! config.State.ProcessManager.SetRunning(message.ProcessId)
+                                        config.Logger.Logf "Dequeued message %A" message.JobId
+                                        return! config.State.JobManager.Update(message.ProcessId, message.JobId, JobStatus.Dequeued, config.State.WorkerManager.Current.Id, message.DeliveryCount)
+                                    }
                                     match res with
                                     | Choice2Of2 ex ->
-                                        config.Logger.Logf "Failed to update message %A state :\n%A\nCalling Abandon." message.JobId ex
+                                        config.Logger.Logf "Failed to update state for message %A :\n%A\nCalling Abandon." message.JobId ex
                                         do! config.State.JobQueue.AbandonAsync(message)
                                     | Choice1Of2 _ -> 
                                         config.Logger.Log "Downloading PickledJob"

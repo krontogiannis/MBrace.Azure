@@ -97,10 +97,6 @@ and [<AutoSerializable(false)>]
                 logf "Failed to UnPickle Job :\n%A" ex
                 return! FaultHandler.FaultPickledJobAsync(jobItem, msg, staticConfiguration.State, ex)
             | Choice1Of2 job ->
-                if job.JobType = JobType.Root then
-                    logf "Starting Root job for Process Id : %s, Name : %s" job.ProcessInfo.Id job.ProcessInfo.Name
-                    do! staticConfiguration.State.ProcessManager.SetRunning(job.ProcessInfo.Id)
-
                 logf "Starting job\n%s" (string job) 
                 logf "Delivery count : %d" msg.DeliveryCount
                 do! staticConfiguration.State.JobManager.Update(job.ProcessInfo.Id, job.JobId, JobStatus.Active) // TODO : handle error
