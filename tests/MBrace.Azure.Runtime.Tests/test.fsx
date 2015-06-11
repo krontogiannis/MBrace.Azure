@@ -44,7 +44,10 @@ runtime.AttachLocalWorker(4, 16)
 let ps = runtime.CreateProcess (Seq.init 100 (fun i -> cloud { return i}) |> Cloud.Parallel)
 
 let ps = runtime.CreateProcess <| cloud { return 42 }
-ps.ShowJobs()
+let j = ps.GetJobs()
+let m = j |> Seq.head
+printfn "%O" m
+
 
 runtime.ShowProcesses()
 runtime.ShowWorkers()

@@ -251,20 +251,22 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     let getJob () =
         JobCache.GetRecord(job.ProcessId, job.Id)
 
+    override this.ToString () = sprintf "Job:%s" job.Id
+
     /// Job unique identifier.
-    member this.Id = getJob().Id
+    member this.Id = job.Id
     /// Job's PID.
-    member this.ProcessId = getJob().ProcessId
+    member this.ProcessId = job.ProcessId
     /// Parent job identifier.
-    member this.ParentId = getJob().ParentId
+    member this.ParentId = job.ParentId
     /// Type of this job.
-    member this.JobType = parseJobType <| getJob()
+    member this.JobType = parseJobType <| job
     /// Job status.
     member this.Status = parseJobStatus <| getJob()
     /// Worker executing this job.
     member this.WorkerId = getJob().WorkerId
     /// Job return type.
-    member this.ReturnType = getJob().ReturnType
+    member this.ReturnType = job.ReturnType
     /// Job timestamp, used for active jobs.
     member this.Timestamp = getJob().Timestamp
     /// The number of times this job has been dequeued for execution.
@@ -278,10 +280,10 @@ type Job internal (config : ConfigurationId, job : JobRecord) =
     /// The point in time this job completed.
     member this.CompletionTime = getJob().CompletionTime.ToOption()
     /// Approximation of the job's serialized size in bytes.
-    member this.JobSize = getJob().Size.GetValueOrDefault()
+    member this.JobSize = job.Size.GetValueOrDefault()
 
-    member internal this.ResultPartition = getJob().ResultPartition
-    member internal this.ResultRow = getJob().ResultRow
+    member internal this.ResultPartition = job.ResultPartition
+    member internal this.ResultRow = job.ResultRow
     member internal this.ConfigurationId = config
 
     override this.GetHashCode() = hash this.Id
