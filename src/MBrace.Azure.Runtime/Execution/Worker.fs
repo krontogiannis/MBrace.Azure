@@ -92,26 +92,31 @@ type internal Worker () =
                             let! _ = Async.StartChild <| async { 
                                 try
                                     config.Logger.Logf "Dequeued message %A" message.JobId
-                                    do! config.State.JobManager.Update(message.ProcessId, message.JobId, JobStatus.Dequeued, config.State.WorkerManager.Current.Id, message.DeliveryCount)
-                                    config.Logger.Log "Downloading PickledJob"
-                                    let! pickledJob = Async.Catch <| message.GetPayloadAsync<PickledJob>()
-                                    match pickledJob with
+                                    let! res = Async.Catch <| config.State.JobManager.Update(message.ProcessId, message.JobId, JobStatus.Dequeued, config.State.WorkerManager.Current.Id, message.DeliveryCount)
+                                    match res with
                                     | Choice2Of2 ex ->
-                                        config.Logger.Logf "Failed to download PickledJob :\n%A" ex
-                                        return! FaultHandler.FaultMessageAsync(message, config.State, ex)
-                                    | Choice1Of2 pickledJob ->
-                                        config.Logger.Log "Downloading assemblies locally"     
-                                        let! localAssemblies = Async.Catch <| config.State.AssemblyManager.DownloadDependencies pickledJob.Dependencies
-
-                                        match localAssemblies with
-                                        | Choice1Of2 localAssemblies ->                                    
-                                            let! ch = config.JobEvaluator.EvaluateAsync(config.JobEvaluatorConfiguration, localAssemblies, message, pickledJob)
-                                            match ch with
-                                            | Choice1Of2 () -> return ()
-                                            | Choice2Of2 e  -> config.Logger.Logf "Unhandled exception : %A" e
+                                        config.Logger.Logf "Failed to update message %A state :\n%A\nCalling Abandon." message.JobId ex
+                                        do! config.State.JobQueue.AbandonAsync(message)
+                                    | Choice1Of2 _ -> 
+                                        config.Logger.Log "Downloading PickledJob"
+                                        let! pickledJob = Async.Catch <| message.GetPayloadAsync<PickledJob>()
+                                        match pickledJob with
                                         | Choice2Of2 ex ->
-                                            config.Logger.Logf "Failed to download PickledJob or dependencies:\n%A" ex
-                                            do! FaultHandler.FaultPickledJobAsync(pickledJob, message, config.State, ex)
+                                            config.Logger.Logf "Failed to download PickledJob :\n%A" ex
+                                            return! FaultHandler.FaultMessageAsync(message, config.State, ex)
+                                        | Choice1Of2 pickledJob ->
+                                            config.Logger.Log "Downloading assemblies locally"     
+                                            let! localAssemblies = Async.Catch <| config.State.AssemblyManager.DownloadDependencies pickledJob.Dependencies
+
+                                            match localAssemblies with
+                                            | Choice1Of2 localAssemblies ->                                    
+                                                let! ch = config.JobEvaluator.EvaluateAsync(config.JobEvaluatorConfiguration, localAssemblies, message, pickledJob)
+                                                match ch with
+                                                | Choice1Of2 () -> return ()
+                                                | Choice2Of2 e  -> config.Logger.Logf "Unhandled exception : %A" e
+                                            | Choice2Of2 ex ->
+                                                config.Logger.Logf "Failed to download PickledJob or dependencies:\n%A" ex
+                                                do! FaultHandler.FaultPickledJobAsync(pickledJob, message, config.State, ex)
                                 finally
                                     let jc = Interlocked.Decrement &currentJobCount
                                     config.State.WorkerManager.SetJobCountLocal(jc)
