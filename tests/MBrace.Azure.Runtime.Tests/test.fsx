@@ -12,6 +12,7 @@ open MBrace.Azure.Client
 open System
 open MBrace.Store
 open MBrace.Store.Internals
+open System.IO
 
 Runtime.LocalWorkerExecutable <- __SOURCE_DIRECTORY__ + "/../../bin/mbrace.azureworker.exe"
 
@@ -20,13 +21,13 @@ let selectEnv name =
     (Environment.GetEnvironmentVariable(name,EnvironmentVariableTarget.User),
       Environment.GetEnvironmentVariable(name,EnvironmentVariableTarget.Machine),
         Environment.GetEnvironmentVariable(name,EnvironmentVariableTarget.Process))
-    |> function
+    |> function 
        | s, _, _ when not <| String.IsNullOrEmpty(s) -> s
        | _, s, _ when not <| String.IsNullOrEmpty(s) -> s
        | _, _, s when not <| String.IsNullOrEmpty(s) -> s
        | _ -> failwith "Variable not found"
 
-let config =
+let config = 
     { Configuration.Default with
         StorageConnectionString = selectEnv "azurestorageconn"
         ServiceBusConnectionString = selectEnv "azureservicebusconn" }
@@ -116,14 +117,13 @@ let cr = runtime.Run <| CloudValue.New(42)
 
 runtime.Run <| cr.Value
 
-let wf = [1..20]
-         |> List.map (fun i -> cloud { return i })
+let wf = [1..20] 
+         |> List.map (fun i -> cloud { return i }) 
          |> Cloud.Parallel
          |> runtime.CreateProcess
 
 wf.ShowInfo()
 runtime.ShowWorkers()
-
 
 let ps = runtime.CreateProcess(cloud { for i in [1..10] do printfn "FOOOO" })
 
@@ -157,7 +157,7 @@ ps.AwaitResult()
 
 
 
-let wf =
+let wf = 
     cloud {
         let! ct = Cloud.CreateCancellationTokenSource()
         let! t = Cloud.StartAsCloudTask(cloud { return 42 }, cancellationToken = ct.Token)
@@ -169,18 +169,18 @@ ps.AwaitResult()
 ps.ShowInfo()
 
 
-let ps () =
+let ps () = 
  cloud { let tasks = new ResizeArray<_>()
-         for i in [ 0 .. 200 ] do
+         for i in [ 0 .. 200 ] do 
              let! x = Cloud.StartAsCloudTask (cloud { do! Cloud.Sleep 1000
                                                       return 1 })
              tasks.Add x
-         for t in tasks.ToArray() do
+         for t in tasks.ToArray() do 
              let! res = t.AwaitResult()
              ()
         }
 
-let job =
+let job = 
    cloud { return! ps() }
      |> runtime.CreateProcess
 
@@ -204,7 +204,7 @@ ctask.Result
 ctask.Id
 
 
-let x =
+let x = 
     cloud {
         let! ctask = Cloud.StartAsCloudTask(cloud { return 42 })
         return! ctask.AwaitResult()
@@ -218,7 +218,7 @@ let wf = cloud {
                 do! CloudChannel.Send(sp, i)
                 printfn "send %d" i
             return ()
-        }
+        } 
         <||>
         cloud {
             let i = ref 0
@@ -234,7 +234,7 @@ runtime.Run wf
 
 let wf = cloud {
     let! atom = CloudAtom.New(42)
-    do! [1..10]
+    do! [1..10] 
         |> Seq.map (fun _ -> CloudAtom.Update(atom, fun x -> x + 1))
         |> Cloud.Parallel
         |> Cloud.Ignore
@@ -249,7 +249,7 @@ module FaultPolicyExtensions =
     type FaultPolicyBuilder (fp : FaultPolicy) =
         inherit CloudBuilder()
 
-        member __.Run(wf : Cloud<'T>) =
+        member __.Run(wf : Cloud<'T>) = 
             cloud {
                 let! handle = wf
                               |> Cloud.StartChild
@@ -262,9 +262,9 @@ module FaultPolicyExtensions =
     let infinite = new FaultPolicyBuilder(FaultPolicy.InfiniteRetry()) //:> CloudBuilder
 
 let wf = cloud {
-    let! x = infinite {
+    let! x = infinite { 
                 printfn "infinite"
-                do! Cloud.Sleep 10000
+                do! Cloud.Sleep 10000 
                 return 42
             }
     let! z = retry 3 {
@@ -272,10 +272,10 @@ let wf = cloud {
                 do! Cloud.Sleep 10000
                 return 44
             }
-    let! y = exactlyOnce {
+    let! y = exactlyOnce { 
                 printfn "exactlyOnce"
                 do! Cloud.Sleep 10000
-                return 43
+                return 43 
             }
     return x, z, y
 }
